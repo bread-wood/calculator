@@ -77,6 +77,7 @@ class Lexer:
                 self._advance()
                 while self._peek().isdigit():
                     self._advance()
+        # optional exponent: e/E followed by optional +/- and digits
         if self._peek() in ("e", "E"):
             self._advance()
             if self._peek() in ("+", "-"):
