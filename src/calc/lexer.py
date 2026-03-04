@@ -77,4 +77,10 @@ class Lexer:
                 self._advance()
                 while self._peek().isdigit():
                     self._advance()
+        if self._peek() in ("e", "E"):
+            self._advance()
+            if self._peek() in ("+", "-"):
+                self._advance()
+            while self._peek().isdigit():
+                self._advance()
         return Token(TokenType.NUMBER, self._input[start : self._cursor])
