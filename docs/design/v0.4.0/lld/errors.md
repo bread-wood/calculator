@@ -1,57 +1,76 @@
-# Low-Level Design — `errors` Module (v0.4.0)
+# Low-Level Design: `errors` module — Calculator v0.4.0
 
 **Milestone:** v0.4.0
+**Module:** `errors`
+**File:** `src/calc/errors.py`
 **Date:** 2026-03-05
 **Status:** Draft
-**Issue:** #192
+**Previous LLD:** `docs/design/v0.3.0/lld/errors.md`
 
 ---
 
-## 1. Responsibility
+## 1. Scope
 
-The `errors` module is the sole owner of the `CalcError` exception hierarchy. It
-defines one base class and one concrete subclass per error variant, provides a
-human-readable `description()` on each subclass, and exposes the `error_message()`
-helper that formats the final stderr line. The module has **no dependencies** on any
-other `calc` module, making it safe to import from any layer without creating a cycle.
+This document is a **delta** from v0.3.0. Only changes are described here; refer to
+`docs/design/v0.3.0/lld/errors.md` for data structures, algorithms, and interface
+sections that are unchanged.
+
+v0.4.0 makes four targeted changes to `errors.py`:
+
+1. Modify `UnknownFunction.description()` — new wording required by spec.
+2. Modify `WrongArity.description()` — new prefix and wording required by spec.
+3. Add `FunctionAlreadyDefined(name: str)` — new error for duplicate `def` statements.
+4. Add `CannotRedefineBuiltin(name: str)` — new error for `def` targeting a built-in name.
+
+All other classes, the `CalcError` base, and `error_message()` are **unchanged**.
 
 ---
 
-## 2. Data Structures
+## 2. Responsibilities (delta)
 
-### 2.1 `CalcError` — base class
+Added responsibilities:
+- Express `FunctionAlreadyDefined` and `CannotRedefineBuiltin` error conditions with
+  human-readable `description()` messages matching the v0.4.0 spec.
 
-```python
-class CalcError(Exception):
-    def description(self) -> str:
-        raise AttributeError  # abstract; subclasses must override
+Updated responsibilities:
+- `UnknownFunction` and `WrongArity` description strings are updated to align with the
+  rest of the error vocabulary (no quotes around function names; consistent prefixes).
+
+What this module does NOT do — **unchanged** from v0.3.0.
+
+---
+
+## 3. Class Hierarchy (v0.4.0 state)
+
+```
+Exception
+└── CalcError                       (base; description() -> str; abstract)
+    ├── ExpectedSingleArg           (v0.1.0; unchanged)
+    ├── EmptyExpression             (v0.1.0; unchanged)
+    ├── UnexpectedToken             (v0.1.0; unchanged)
+    ├── UnexpectedEnd               (v0.1.0; unchanged)
+    ├── DivisionByZero              (v0.1.0; unchanged)
+    ├── Overflow                    (v0.1.0; unchanged)
+    ├── DomainError                 (v0.2.0; unchanged)
+    ├── UnknownFunction             (v0.2.0; description() UPDATED)
+    ├── WrongArity                  (v0.2.0; description() UPDATED)
+    ├── UndefinedVariable           (v0.3.0; unchanged)
+    ├── ConstantReassignment        (v0.3.0; unchanged)
+    ├── FunctionAlreadyDefined      (new v0.4.0; name: str)
+    └── CannotRedefineBuiltin       (new v0.4.0; name: str)
 ```
 
-- Inherits `Exception` so any `CalcError` is a native Python exception and can be
-  raised and caught with standard syntax.
-- `description()` is an abstract-by-convention method (no `@abstractmethod` decorator;
-  the existing codebase uses `raise AttributeError` to signal missing overrides).
-- Subclasses do **not** override `__str__`; the formatted message is always obtained
-  by calling `description()` or `error_message()`.
+`FunctionAlreadyDefined` and `CannotRedefineBuiltin` are **sibling** direct subclasses
+of `CalcError`. Neither is a subclass of the other. The semantics differ:
+`FunctionAlreadyDefined` signals a duplicate user-function definition; `CannotRedefineBuiltin`
+signals an attempt to shadow a built-in. Keeping them separate allows callers to
+assert on exception type unambiguously in tests.
 
-### 2.2 Zero-argument error classes
+---
 
-These classes carry no per-instance data and require no `__init__` override. They
-inherit `CalcError.__init__` unchanged.
+## 4. Public Interface (changed classes only)
 
-| Class | `description()` return value |
-|---|---|
-| `ExpectedSingleArg` | `"expected a single quoted expression"` |
-| `EmptyExpression` | `"empty expression"` |
-| `UnexpectedToken` | `"unexpected token"` |
-| `UnexpectedEnd` | `"unexpected end of expression"` |
-| `DivisionByZero` | `"division by zero"` |
-| `Overflow` | `"overflow"` |
-| `DomainError` | `"domain error"` |
-
-### 2.3 Parameterised error classes (pre-v0.4.0, updated in v0.4.0)
-
-#### `UnknownFunction(name: str)` — message updated in v0.4.0
+### 4.1 `UnknownFunction` — updated `description()`
 
 ```python
 class UnknownFunction(CalcError):
@@ -60,14 +79,19 @@ class UnknownFunction(CalcError):
         super().__init__(name)
 
     def description(self) -> str:
-        return f"undefined function: {self.name}"
+        return f"undefined function: {self.name}"  # was: f"unknown function '{self.name}'"
 ```
 
-Change from v0.3.x: prefix changed from `"unknown function '{name}'"` to
-`"undefined function: {name}"` (drop surrounding quotes; change prefix word and
-separator). No quotes around the name; consistent with `UndefinedVariable`.
+**Change:** Prefix changes from `unknown function '...'` to `undefined function: ...`.
+Quotes around the name are removed. The `name` attribute and `__init__` signature are
+unchanged. All existing raise-sites in `evaluator.py` remain correct; no evaluator
+changes are required.
 
-#### `WrongArity(name: str, expected: int)` — message updated in v0.4.0
+**Rationale (research #155):** The new wording is consistent with `undefined variable: x`
+and `cannot reassign constant: pi`. The old wording (`unknown function 'sqrt'`) quoted
+the name inconsistently with other error classes. The v0.4.0 spec mandates the new form.
+
+### 4.2 `WrongArity` — updated `description()`
 
 ```python
 class WrongArity(CalcError):
@@ -79,39 +103,20 @@ class WrongArity(CalcError):
     def description(self) -> str:
         noun = "argument" if self.expected == 1 else "arguments"
         return f"wrong number of arguments: {self.name} expects {self.expected} {noun}"
+        # was: f"'{self.name}' expects {self.expected} {noun}"
 ```
 
-Change from v0.3.x: prefix `"wrong number of arguments: "` added; surrounding
-quotes around `name` removed. `expected` attribute is retained because it is
-used by the pluralisation logic and may be inspected in tests.
+**Change:** Prefix `wrong number of arguments: ` is prepended; quotes around `name`
+are removed. The `name` and `expected` attributes and `__init__` signature are
+unchanged. Pluralisation logic is retained.
 
-#### `UndefinedVariable(name: str)` — unchanged
+**Rationale (research #155 Q4):** Option 4b (keep pluralisation, update prefix) is
+chosen. `pow expects 2 arguments` is more informative than `pow expects 2`. The spec
+mandates the new prefix; the added noun word does not conflict. Retaining pluralisation
+is consistent with the existing behaviour and makes the message grammatically correct
+for multi-argument functions.
 
-```python
-class UndefinedVariable(CalcError):
-    def __init__(self, name: str) -> None:
-        self.name = name
-        super().__init__(name)
-
-    def description(self) -> str:
-        return f"undefined variable: {self.name}"
-```
-
-#### `ConstantReassignment(name: str)` — unchanged
-
-```python
-class ConstantReassignment(CalcError):
-    def __init__(self, name: str) -> None:
-        self.name = name
-        super().__init__(name)
-
-    def description(self) -> str:
-        return f"cannot reassign constant: {self.name}"
-```
-
-### 2.4 New parameterised error classes (v0.4.0)
-
-#### `FunctionAlreadyDefined(name: str)`
+### 4.3 `FunctionAlreadyDefined` — new
 
 ```python
 class FunctionAlreadyDefined(CalcError):
@@ -123,12 +128,14 @@ class FunctionAlreadyDefined(CalcError):
         return f"function already defined: {self.name}"
 ```
 
-Raised by `execute_statement()` in the evaluator when a `FunctionDef` statement
-names a function already present in `fn_env`. This is a user-defined → user-defined
-collision. It is **not** a subclass of `CannotRedefineBuiltin`; the two conditions
-are semantically distinct.
+**Pattern:** Identical to `UndefinedVariable` and `ConstantReassignment` — single
+`name: str` arg, stored on `self`, passed to `super().__init__`, no quotes in message.
 
-#### `CannotRedefineBuiltin(name: str)`
+**Raised by:** `execute_statement()` in `evaluator.py` when a `FunctionDef` statement
+names a function already present in `fn_env`. `errors.py` defines the class; `evaluator.py`
+owns the guard logic.
+
+### 4.4 `CannotRedefineBuiltin` — new
 
 ```python
 class CannotRedefineBuiltin(CalcError):
@@ -140,228 +147,206 @@ class CannotRedefineBuiltin(CalcError):
         return f"cannot redefine built-in: {self.name}"
 ```
 
-Raised by `execute_statement()` when a `FunctionDef` targets a name that already
-exists in `_FUNCTION_TABLE` (the built-in function registry). It is a **sibling** of
-`FunctionAlreadyDefined` (both are direct subclasses of `CalcError`), enabling
-unambiguous `isinstance` checks in tests.
+**Pattern:** Same single-`name` pattern as `FunctionAlreadyDefined`. Note the hyphen
+in `built-in` matches the spec's mandated output string.
 
-### 2.5 Class hierarchy diagram
+**Raised by:** `execute_statement()` in `evaluator.py` when a `FunctionDef` statement
+names a function already present in `_FUNCTION_TABLE`. Checked before the `fn_env`
+duplicate check.
 
-```
-CalcError (Exception)
-├── ExpectedSingleArg
-├── EmptyExpression
-├── UnexpectedToken
-├── UnexpectedEnd
-├── DivisionByZero
-├── Overflow
-├── DomainError
-├── UnknownFunction          (message updated v0.4.0)
-├── WrongArity               (message updated v0.4.0)
-├── UndefinedVariable
-├── ConstantReassignment
-├── FunctionAlreadyDefined   (NEW v0.4.0)
-└── CannotRedefineBuiltin    (NEW v0.4.0)
-```
+### 4.5 `error_message()` — unchanged
 
-All subclasses are direct children of `CalcError`. No intermediate abstract classes
-are introduced.
+No change to implementation or signature. The function dispatches via Python method
+resolution; new subclasses with correct `description()` overrides are handled
+automatically without any modification to `error_message()`.
 
 ---
 
-## 3. Public API / Interfaces
+## 5. Data Structures (new classes only)
 
-### 3.1 Module-level exports
+| Class | Attributes | Invariant |
+|---|---|---|
+| `FunctionAlreadyDefined` | `name: str` | non-empty string; the name as it appeared in the `def` statement |
+| `CannotRedefineBuiltin` | `name: str` | must be a key in `_FUNCTION_TABLE` in `evaluator.py`; `errors.py` does not validate this |
 
-`errors.py` exposes every class listed in §2 and the `error_message()` helper. There
-is no `__all__`; all top-level names are importable.
+No mutable state; all attributes set once in `__init__`.
 
-### 3.2 `error_message(e: CalcError) -> str`
-
-```python
-def error_message(e: CalcError) -> str:
-    try:
-        return f"error: {e.description()}"
-    except AttributeError:
-        raise TypeError(f"Unknown CalcError subclass: {type(e)!r}") from None
-```
-
-- Produces the exact string written to stderr by the CLI (`"error: <description>"`).
-- Guards against subclasses that forget to override `description()` by converting
-  the `AttributeError` into a `TypeError` with a diagnostic message.
-- No change to this function in v0.4.0.
-
-### 3.3 Raise-site responsibility
-
-The `errors` module only **defines** exceptions; it never raises them itself.
-Raise-site responsibility by class:
-
-| Class | Module that raises it |
-|---|---|
-| `ExpectedSingleArg` | `cli` (`__main__.py`) |
-| `EmptyExpression` | `cli` (`__main__.py`) |
-| `UnexpectedToken` | `lexer.py`, `parser.py` |
-| `UnexpectedEnd` | `parser.py` |
-| `DivisionByZero` | `evaluator.py` |
-| `Overflow` | `evaluator.py` |
-| `DomainError` | `evaluator.py` |
-| `UnknownFunction` | `evaluator.py` (built-in dispatch + definition-time body walk) |
-| `WrongArity` | `evaluator.py` |
-| `UndefinedVariable` | `evaluator.py` |
-| `ConstantReassignment` | `evaluator.py` |
-| `FunctionAlreadyDefined` | `evaluator.py` (`execute_statement`) |
-| `CannotRedefineBuiltin` | `evaluator.py` (`execute_statement`) |
+For unchanged class data structures, see `docs/design/v0.3.0/lld/errors.md` §5.
 
 ---
 
-## 4. Key Algorithms
+## 6. Error Message Strings (v0.4.0 canonical)
 
-The `errors` module contains no algorithms; it is pure data definitions. The only
-non-trivial logic is in `WrongArity.description()`:
-
-```python
-noun = "argument" if self.expected == 1 else "arguments"
-return f"wrong number of arguments: {self.name} expects {self.expected} {noun}"
-```
-
-This is a single conditional expression for English pluralisation. It is applied
-uniformly for both built-in and user-defined function arity mismatches.
-
----
-
-## 5. Error Handling
-
-The `errors` module itself raises only one exception type: `TypeError` from
-`error_message()` when the supplied `CalcError` subclass has not overridden
-`description()`. This is a programming error (not a user error) and is never caught
-at the CLI boundary.
-
-All other error conditions in the system are handled by:
-1. A subclass of `CalcError` being raised at the appropriate layer.
-2. The CLI catching the first `CalcError` that propagates to it, calling
-   `error_message(e)`, writing the result to stderr, and exiting with code 1.
-
-No error is swallowed silently anywhere in the pipeline.
+| Class | `error_message(e)` output | Change from v0.3.0 |
+|---|---|---|
+| `ExpectedSingleArg` | `error: expected a single quoted expression` | — |
+| `EmptyExpression` | `error: empty expression` | — |
+| `UnexpectedToken` | `error: unexpected token` | — |
+| `UnexpectedEnd` | `error: unexpected end of expression` | — |
+| `DivisionByZero` | `error: division by zero` | — |
+| `Overflow` | `error: overflow` | — |
+| `DomainError` | `error: domain error` | — |
+| `UnknownFunction("f")` | `error: undefined function: f` | **Updated** (was: `error: unknown function 'f'`) |
+| `WrongArity("f", 1)` | `error: wrong number of arguments: f expects 1 argument` | **Updated** (was: `error: 'f' expects 1 argument`) |
+| `WrongArity("f", 2)` | `error: wrong number of arguments: f expects 2 arguments` | **Updated** (was: `error: 'f' expects 2 arguments`) |
+| `UndefinedVariable("x")` | `error: undefined variable: x` | — |
+| `ConstantReassignment("pi")` | `error: cannot reassign constant: pi` | — |
+| `FunctionAlreadyDefined("f")` | `error: function already defined: f` | **New** |
+| `CannotRedefineBuiltin("sqrt")` | `error: cannot redefine built-in: sqrt` | **New** |
 
 ---
 
-## 6. File Layout
+## 7. Key Algorithms and Logic (delta)
+
+**Quoting conventions (updated):** v0.4.0 eliminates all quotes around function names
+in error messages. The previous inconsistency (quotes in `UnknownFunction`/`WrongArity`,
+no quotes in `UndefinedVariable`/`ConstantReassignment`) is resolved. v0.4.0 has a
+uniform no-quotes style for all parameterised errors.
+
+All other algorithm notes are unchanged from v0.3.0 — see §7 of the prior LLD.
+
+---
+
+## 8. Internal Structure (v0.4.0 state)
 
 ```
 src/calc/errors.py
+  CalcError                     (base)
+  ExpectedSingleArg             (existing)
+  EmptyExpression               (existing)
+  UnexpectedToken               (existing)
+  UnexpectedEnd                 (existing)
+  DivisionByZero                (existing)
+  Overflow                      (existing)
+  DomainError                   (existing)
+  UnknownFunction               (existing; description updated)
+  WrongArity                    (existing; description updated)
+  UndefinedVariable             (existing)
+  ConstantReassignment          (existing)
+  FunctionAlreadyDefined        (new)
+  CannotRedefineBuiltin         (new)
+  error_message()               (public function; unchanged)
 ```
 
-Single file, no subpackages. Ordering of class definitions in the file:
-
-1. `CalcError` (base)
-2. Zero-argument classes in their existing order:
-   `ExpectedSingleArg`, `EmptyExpression`, `UnexpectedToken`, `UnexpectedEnd`,
-   `DivisionByZero`, `Overflow`, `DomainError`
-3. Parameterised classes (existing, in their existing order):
-   `UnknownFunction`, `WrongArity`, `UndefinedVariable`, `ConstantReassignment`
-4. New parameterised classes (appended at end):
-   `FunctionAlreadyDefined`, `CannotRedefineBuiltin`
-5. `error_message()` helper (last, as today)
-
-Adding new classes at the end of the file avoids unnecessary diff noise on existing
-lines and keeps git blame clean.
+Declaration order: base first, no-arg subclasses, single-arg subclasses, two-arg
+subclasses, then `error_message`. The two new classes append naturally after
+`ConstantReassignment`, maintaining the existing ordering discipline.
 
 ---
 
-## 7. Test Strategy
+## 9. Error Handling Within This Module — unchanged
 
-Tests live in `tests/test_errors.py`. A `# v0.4.0 — user-defined functions` block
-is appended to the existing file.
+No change from v0.3.0. See §9 of the prior LLD.
 
-### 7.1 Tests to update (existing assertions)
+---
 
-| Test function | Required change |
+## 10. Interaction with Other Modules (v0.4.0 state)
+
+| Caller | Raises | Via |
+|---|---|---|
+| `__main__.py` | `ExpectedSingleArg`, `EmptyExpression` | arg-count / empty-string checks |
+| `lexer.py` | `UnexpectedToken` | unrecognised character |
+| `parser.py` | `UnexpectedToken`, `UnexpectedEnd` | syntax errors |
+| `evaluator.py` | `DivisionByZero`, `Overflow`, `DomainError`, `UnknownFunction`, `WrongArity`, `UndefinedVariable`, `ConstantReassignment`, `FunctionAlreadyDefined`, `CannotRedefineBuiltin` | arithmetic, name, and function-definition errors |
+| `__main__.py` | — | catches all `CalcError`; calls `error_message(e)` → stderr |
+
+---
+
+## 11. Migration from v0.3.0
+
+### Files that change
+
+| File | Change |
 |---|---|
-| `test_unknown_function_message` | Expected string: `"error: undefined function: sqrt"` (was `"error: unknown function 'sqrt'"`) |
-| `test_wrong_arity_singular` | Expected string: `"error: wrong number of arguments: abs expects 1 argument"` (was `"error: 'abs' expects 1 argument"`) |
-| `test_wrong_arity_plural` | Expected string: `"error: wrong number of arguments: pow expects 2 arguments"` (was `"error: 'pow' expects 2 arguments"`) |
+| `src/calc/errors.py` | Update `UnknownFunction.description()`; update `WrongArity.description()`; add `FunctionAlreadyDefined`; add `CannotRedefineBuiltin` |
+| `tests/test_errors.py` | Update 3 existing assertions (lines 59, 63, 67); add 2 new test functions; extend import list |
 
-### 7.2 New tests
+### Files that do NOT change due to errors.py
 
-```python
-# v0.4.0 — user-defined functions
-
-def test_function_already_defined_message():
-    assert error_message(FunctionAlreadyDefined("f")) == "error: function already defined: f"
-
-def test_cannot_redefine_builtin_message():
-    assert error_message(CannotRedefineBuiltin("sqrt")) == "error: cannot redefine built-in: sqrt"
-
-def test_unknown_function_no_quotes():
-    """Name must not be surrounded by quotes in the new wording."""
-    msg = error_message(UnknownFunction("myFunc"))
-    assert "'" not in msg
-    assert "myFunc" in msg
-
-def test_wrong_arity_no_quotes_around_name():
-    """Function name must not be surrounded by quotes in the new wording."""
-    msg = error_message(WrongArity("myFunc", 2))
-    assert "'" not in msg
-    assert "myFunc" in msg
-
-def test_wrong_arity_new_prefix():
-    assert error_message(WrongArity("f", 1)).startswith("error: wrong number of arguments:")
-
-def test_function_already_defined_stores_name():
-    e = FunctionAlreadyDefined("g")
-    assert e.name == "g"
-
-def test_cannot_redefine_builtin_stores_name():
-    e = CannotRedefineBuiltin("sin")
-    assert e.name == "sin"
-
-def test_function_already_defined_is_calc_error():
-    assert isinstance(FunctionAlreadyDefined("f"), CalcError)
-
-def test_cannot_redefine_builtin_is_calc_error():
-    assert isinstance(CannotRedefineBuiltin("sin"), CalcError)
-
-def test_function_already_defined_not_subclass_of_cannot_redefine():
-    assert not issubclass(FunctionAlreadyDefined, CannotRedefineBuiltin)
-
-def test_cannot_redefine_not_subclass_of_function_already_defined():
-    assert not issubclass(CannotRedefineBuiltin, FunctionAlreadyDefined)
-```
-
-### 7.3 Test coverage targets
-
-- Every `CalcError` subclass must have at least one test asserting the exact string
-  returned by `error_message()`.
-- `WrongArity` must have tests for both singular (`expected=1`) and plural
-  (`expected=2`) forms.
-- The two new sibling classes (`FunctionAlreadyDefined`, `CannotRedefineBuiltin`)
-  must each have a test asserting `isinstance(e, CalcError)` and a test asserting
-  they are **not** subclasses of each other.
-- `error_message()` itself is covered implicitly by all class-level tests; no
-  additional integration test needed.
-
-### 7.4 What is not tested here
-
-Raise-sites (the evaluator calling `raise FunctionAlreadyDefined(name)`) are tested
-in `test_evaluator.py` and `test_cli.py`, not in `test_errors.py`. The `errors`
-module tests focus solely on the description strings and class relationships.
+- `src/calc/evaluator.py` — existing `UnknownFunction` and `WrongArity` raise-sites
+  remain correct; updated `description()` methods propagate automatically. New raise-sites
+  for `FunctionAlreadyDefined` and `CannotRedefineBuiltin` are added in `evaluator.py`
+  but are driven by the evaluator LLD, not this one.
+- `src/calc/__main__.py` — `except CalcError` handler catches all subclasses by
+  inheritance; no change required.
+- `tests/test_lexer.py`, `tests/test_parser.py`, `tests/test_cli.py` — do not import
+  `UnknownFunction` or `WrongArity` directly; string assertions for these errors live
+  in `test_cli.py` and will be updated as part of the CLI test additions (research #159).
 
 ---
 
-## 8. Open Questions Resolved
+## 12. Testing Strategy (delta)
 
-From HLD §Open Questions item 4:
+**File:** `tests/test_errors.py`
 
-> **`errors` LLD** — Whether `WrongArity` retains a separate `expected` attribute
-> after the message change, and whether `CannotRedefineBuiltin` is a subclass of
-> any existing error or a direct subclass of `CalcError`.
+### 12.1 Existing tests to update
 
-**Resolved:**
+Add a `# v0.4.0 — user-defined functions` comment block. Within it, update the three
+existing message-string assertions that pin the old wording:
 
-- `WrongArity.expected` is retained. It is required by the pluralisation logic
-  inside `description()` and may be inspected by test code asserting on the numeric
-  value without parsing the message string.
-- `CannotRedefineBuiltin` is a **direct subclass of `CalcError`**, not a subclass
-  of `FunctionAlreadyDefined` or any other error. This keeps `isinstance` checks
-  unambiguous and reflects the semantic distinction: shadowing a built-in is a
-  different user mistake from redefining a previously user-defined function.
+| Test (line) | Current assertion | Updated assertion |
+|---|---|---|
+| `test_unknown_function_message` (line 59) | `"error: unknown function 'sqrt'"` | `"error: undefined function: sqrt"` |
+| `test_wrong_arity_singular` (line 63) | `"error: 'abs' expects 1 argument"` | `"error: wrong number of arguments: abs expects 1 argument"` |
+| `test_wrong_arity_plural` (line 67) | `"error: 'pow' expects 2 arguments"` | `"error: wrong number of arguments: pow expects 2 arguments"` |
+
+These three updates must land in the same PR as the `errors.py` changes to keep CI
+green (research #159 §Q4).
+
+### 12.2 New tests for v0.4.0
+
+Add the following individual named test functions in the `# v0.4.0` block:
+
+| Test | Assertion |
+|---|---|
+| `test_function_already_defined_message` | `error_message(FunctionAlreadyDefined("f")) == "error: function already defined: f"` |
+| `test_function_already_defined_stores_name` | `FunctionAlreadyDefined("f").name == "f"` |
+| `test_function_already_defined_inherits_calc_error` | `issubclass(FunctionAlreadyDefined, CalcError)` |
+| `test_cannot_redefine_builtin_message` | `error_message(CannotRedefineBuiltin("sqrt")) == "error: cannot redefine built-in: sqrt"` |
+| `test_cannot_redefine_builtin_stores_name` | `CannotRedefineBuiltin("sqrt").name == "sqrt"` |
+| `test_cannot_redefine_builtin_inherits_calc_error` | `issubclass(CannotRedefineBuiltin, CalcError)` |
+| `test_cannot_redefine_builtin_not_subclass_of_function_already_defined` | `not issubclass(CannotRedefineBuiltin, FunctionAlreadyDefined)` |
+
+The last test guards the sibling-not-parent relationship that is semantically required.
+
+### 12.3 Import list update
+
+Add `FunctionAlreadyDefined` and `CannotRedefineBuiltin` to the import block at the
+top of `test_errors.py`. Update `test_new_subclasses_inherit_from_calc_error` (or add
+to `test_all_subclasses_inherit_from_calc_error`) to include both new classes.
+
+### 12.4 Tricky edge cases
+
+| Case | Test | Rationale |
+|---|---|---|
+| `UnknownFunction` no longer quotes name | Assert `"'sqrt'"` does NOT appear in `error_message(UnknownFunction("sqrt"))` | Regression guard for quote removal |
+| `WrongArity` no longer quotes name | Assert `"'abs'"` does NOT appear in `error_message(WrongArity("abs", 1))` | Regression guard for quote removal |
+| `CannotRedefineBuiltin` hyphen in `built-in` | Assert exact string `"error: cannot redefine built-in: sqrt"` | Hyphen is easy to accidentally omit |
+
+### 12.5 What to mock
+
+Nothing. `errors.py` has no I/O and no external dependencies; all tests are pure unit
+tests.
+
+### 12.6 Integration role
+
+`tests/test_cli.py` v0.4.0 block will assert exact stderr output for:
+- `def f(x) = x; def f(x) = x + 1` → `error: function already defined: f` (exit 1)
+- `def sqrt(x) = x` → `error: cannot redefine built-in: sqrt` (exit 1)
+- `f(1)` (with no prior def) → `error: undefined function: f` (exit 1)
+
+These strings derive from the `description()` methods in this module; if wording
+changes here, the CLI tests will catch the divergence.
+
+---
+
+## 13. Dependencies — unchanged
+
+See `docs/design/v0.3.0/lld/errors.md` §13. No new imports; no change in what
+imports `errors.py`.
+
+---
+
+## 14. Non-Goals — unchanged
+
+See `docs/design/v0.3.0/lld/errors.md` §14.
