@@ -39,6 +39,13 @@ ASTNode = Number | BinaryOp | UnaryOp | Name | Call
 
 
 @dataclass
+class FunctionDef:
+    name: str
+    params: list[str]
+    body: ASTNode
+
+
+@dataclass
 class Assignment:
     name: str
     value: ASTNode
@@ -49,7 +56,7 @@ class Program:
     body: list[Statement]
 
 
-Statement = Assignment | ASTNode
+Statement = Assignment | FunctionDef | ASTNode
 
 
 class Parser:
@@ -70,6 +77,8 @@ class Parser:
         return Program(body=body)
 
     def _parse_statement(self) -> Statement:
+        if self._current.type == TokenType.DEF:
+            return self._parse_funcdef()
         if self._current.type == TokenType.IDENT and self._peek_next().type == TokenType.EQUALS:
             name = self._advance().value  # consume IDENT
             self._advance()              # consume EQUALS
@@ -80,6 +89,36 @@ class Parser:
             value = self._parse_expr()
             return Assignment(name=name, value=value)
         return self._parse_expr()
+
+    def _parse_funcdef(self) -> FunctionDef:
+        self._advance()                          # consume DEF
+        name_tok = self._expect(TokenType.IDENT)  # consume function name
+        self._expect(TokenType.LPAREN)            # consume '('
+        params = self._parse_param_list()
+        self._expect(TokenType.RPAREN)            # consume ')'
+        self._expect(TokenType.EQUALS)            # consume '='
+        if self._current.type == TokenType.EOF:
+            raise UnexpectedEnd()
+        body = self._parse_expr()
+        return FunctionDef(name=name_tok.value, params=params, body=body)
+
+    def _parse_param_list(self) -> list[str]:
+        params: list[str] = []
+        if self._current.type == TokenType.RPAREN:
+            return params
+        if self._current.type != TokenType.IDENT:
+            if self._current.type == TokenType.EOF:
+                raise UnexpectedEnd()
+            raise UnexpectedToken()
+        params.append(self._advance().value)
+        while self._current.type == TokenType.COMMA:
+            self._advance()                      # consume ','
+            if self._current.type != TokenType.IDENT:
+                if self._current.type == TokenType.EOF:
+                    raise UnexpectedEnd()
+                raise UnexpectedToken()
+            params.append(self._advance().value)
+        return params
 
     def _peek_next(self) -> Token:
         if self._lookahead is None:
