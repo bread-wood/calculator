@@ -58,7 +58,7 @@ class UnknownFunction(CalcError):
         super().__init__(name)
 
     def description(self) -> str:
-        return f"unknown function '{self.name}'"
+        return f"undefined function: {self.name}"
 
 
 class WrongArity(CalcError):
@@ -69,7 +69,7 @@ class WrongArity(CalcError):
 
     def description(self) -> str:
         noun = "argument" if self.expected == 1 else "arguments"
-        return f"'{self.name}' expects {self.expected} {noun}"
+        return f"wrong number of arguments: {self.name} expects {self.expected} {noun}"
 
 
 class UndefinedVariable(CalcError):
@@ -88,6 +88,24 @@ class ConstantReassignment(CalcError):
 
     def description(self) -> str:
         return f"cannot reassign constant: {self.name}"
+
+
+class FunctionAlreadyDefined(CalcError):
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(name)
+
+    def description(self) -> str:
+        return f"function already defined: {self.name}"
+
+
+class CannotRedefineBuiltin(CalcError):
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(name)
+
+    def description(self) -> str:
+        return f"cannot redefine built-in: {self.name}"
 
 
 def error_message(e: CalcError) -> str:
