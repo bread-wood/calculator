@@ -19,7 +19,7 @@ class TokenType(Enum):
 @dataclass(frozen=True)
 class Token:
     type: TokenType
-    value: str
+    value: str  # raw lexeme; "" for EOF
 
 
 _SINGLE_CHAR: dict[str, TokenType] = {
