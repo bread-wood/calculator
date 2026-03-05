@@ -188,3 +188,117 @@ def test_integer_result_from_variable():
     assert r.stdout.strip() == "2"
     assert r.stderr == ""
     assert r.returncode == 0
+
+
+# v0.4.0 — user-defined functions
+
+def test_function_definition_no_output():
+    r = run_calc("def f(x) = x * 2")
+    assert r.stdout == ""
+    assert r.stderr == ""
+    assert r.returncode == 0
+
+
+def test_function_call_single_arg():
+    r = run_calc("def f(x) = x * 2; f(5)")
+    assert r.stdout.strip() == "10"
+    assert r.stderr == ""
+    assert r.returncode == 0
+
+
+def test_function_call_multi_param():
+    r = run_calc("def f(x, y) = x + y; f(3, 4)")
+    assert r.stdout.strip() == "7"
+    assert r.stderr == ""
+    assert r.returncode == 0
+
+
+def test_function_body_uses_constant_pi():
+    r = run_calc("def f(x) = x * pi; f(2)")
+    assert r.stdout.strip() == "6.283185307179586"
+    assert r.stderr == ""
+    assert r.returncode == 0
+
+
+def test_function_call_result_in_expression():
+    r = run_calc("def f(x) = x; 1 + f(2)")
+    assert r.stdout.strip() == "3"
+    assert r.stderr == ""
+    assert r.returncode == 0
+
+
+def test_function_composed_calls():
+    r = run_calc("def f(x) = x + 1; def g(x) = f(x) * 2; g(3)")
+    assert r.stdout.strip() == "8"
+    assert r.stderr == ""
+    assert r.returncode == 0
+
+
+def test_function_zero_params():
+    r = run_calc("def f() = 42; f()")
+    assert r.stdout.strip() == "42"
+    assert r.stderr == ""
+    assert r.returncode == 0
+
+
+def test_function_definition_and_variable():
+    r = run_calc("x = 3; def f(n) = n * 2; f(x)")
+    assert r.stdout.strip() == "6"
+    assert r.stderr == ""
+    assert r.returncode == 0
+
+
+def test_multiple_definitions_no_output():
+    r = run_calc("def f(x) = x; def g(x) = x * 2")
+    assert r.stdout == ""
+    assert r.stderr == ""
+    assert r.returncode == 0
+
+
+def test_function_call_decimal_result():
+    r = run_calc("def half(x) = x / 2; half(3)")
+    assert r.stdout.strip() == "1.5"
+    assert r.stderr == ""
+    assert r.returncode == 0
+
+
+def test_function_body_uses_builtin():
+    r = run_calc("def mysqrt(x) = sqrt(x); mysqrt(9)")
+    assert r.stdout.strip() == "3"
+    assert r.stderr == ""
+    assert r.returncode == 0
+
+
+def test_function_result_is_integer_formatted():
+    r = run_calc("def f(x) = x * 2; f(3)")
+    assert r.stdout.strip() == "6"
+    assert r.stderr == ""
+    assert r.returncode == 0
+
+
+def test_function_definition_error_already_defined():
+    r = run_calc("def f() = 1; def f() = 2")
+    assert r.stdout == ""
+    assert r.stderr.strip() == "error: function already defined: f"
+    assert r.returncode == 1
+
+
+def test_function_definition_error_redefine_builtin():
+    r = run_calc("def sqrt(x) = x")
+    assert r.stdout == ""
+    assert r.stderr.strip() == "error: cannot redefine built-in: sqrt"
+    assert r.returncode == 1
+
+
+def test_function_call_error_wrong_arity():
+    r = run_calc("def f(x) = x; f(1, 2)")
+    assert r.stdout == ""
+    assert r.stderr.strip() == "error: wrong number of arguments: f expects 1 argument"
+    assert r.returncode == 1
+
+
+def test_function_call_error_undefined_function():
+    r = run_calc("g(1)")
+    assert r.stdout == ""
+    assert r.stderr.strip() == "error: undefined function: g"
+    assert r.returncode == 1
