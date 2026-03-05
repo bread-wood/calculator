@@ -249,3 +249,35 @@ def test_variable_reference_in_expression():
         Token(TokenType.NUMBER, "2"),
         Token(TokenType.EOF,    ""),
     ]
+
+
+# v0.4.0 — user-defined functions
+
+def test_def_keyword_token():
+    assert Lexer("def").next_token() == Token(TokenType.DEF, "def")
+
+
+def test_def_in_statement_sequence():
+    tokens = tokenize("def f ( x ) = x")
+    assert tokens == [
+        Token(TokenType.DEF,    "def"),
+        Token(TokenType.IDENT,  "f"),
+        Token(TokenType.LPAREN, "("),
+        Token(TokenType.IDENT,  "x"),
+        Token(TokenType.RPAREN, ")"),
+        Token(TokenType.EQUALS, "="),
+        Token(TokenType.IDENT,  "x"),
+        Token(TokenType.EOF,    ""),
+    ]
+
+
+def test_define_still_ident():
+    assert Lexer("define").next_token() == Token(TokenType.IDENT, "define")
+
+
+def test_default_still_ident():
+    assert Lexer("default").next_token() == Token(TokenType.IDENT, "default")
+
+
+def test_def_prefix_in_longer_ident():
+    assert Lexer("defun").next_token() == Token(TokenType.IDENT, "defun")
