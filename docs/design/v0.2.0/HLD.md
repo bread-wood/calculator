@@ -8,18 +8,34 @@
 
 ## System Overview
 
-v0.2.0 extends the v0.1.x arithmetic calculator with named mathematical functions
-(`sqrt`, `abs`, `floor`, `ceil`, `round`, `sin`, `cos`, `tan`, `log`, `exp`,
-`pow`, `atan2`) and named constants (`pi`, `e`). The extension validates that the
-v0.1.x parser architecture was designed with genuine extensibility: adding function-
-call syntax and constant references requires only additive changes to all three
-layers (lexer, parser, evaluator) with no restructuring of existing production rules,
-AST nodes, or error-handling paths.
+The calculator is a single-binary command-line tool (`calc`) that accepts one arithmetic
+expression as a shell argument, evaluates it, and prints the result to stdout. It targets
+developers who want quick calculations without leaving the terminal. The implementation is
+in Python and ships with no external runtime dependencies beyond the Python standard library.
 
-**Key constraints (inherited from v0.1.x):**
-- macOS + Linux, Python stdlib only, no third-party runtime dependencies
-- Single-line output, under 100 ms, no config files
+The pipeline has four stages: the **Lexer** tokenises the raw input string; the **Parser**
+consumes the token stream and builds an explicit AST; the **Evaluator** tree-walks the AST
+and produces a `float` result; and the **Formatter** converts that float to a clean string
+for stdout. All errors are represented as `CalcError` subclass instances and are caught at
+the CLI boundary, which is the sole owner of stderr writes and process exit codes.
+
+The codebase has five modules: `cli` (`__main__.py`), `lexer`, `parser`, `evaluator`, and
+`errors`. They form a strict dependency chain: cli → evaluator → parser → lexer; `errors`
+has no dependencies.
+
+In v0.2.0 the evaluator is extended with named mathematical functions (`sqrt`, `abs`,
+`floor`, `ceil`, `round`, `sin`, `cos`, `tan`, `log`, `exp`, `pow`, `atan2`) and named
+constants (`pi`, `e`). This confirms the v0.1.x parser architecture was designed with
+genuine extensibility: adding function-call syntax and constant references requires only
+additive changes to all three layers (lexer, parser, evaluator) with no restructuring of
+existing production rules, AST nodes, or error-handling paths.
+
+**Key constraints:**
+- Single-argument invocation: `calc '<expression>'`
+- Runs on macOS and Linux with no external runtime dependencies beyond stdlib
 - `make test` must pass clean on both platforms
+- Completes any valid expression in under 100 ms
+- Parser architecture must extend to named functions and variables without a rewrite
 
 **Non-goals for this version:**
 - Inverse trig (`asin`, `acos`), `log2`, `log10`, degree mode
@@ -94,8 +110,15 @@ AST nodes, or error-handling paths.
 
 ### Key Design Decisions
 
-| Decision | Rationale | Research |
-|----------|-----------|----------|
+| Decision | Rationale | Research reference |
+|---|---|---|
+| Python implementation | CI already uses `uv run pytest`; stdlib covers all requirements | `testing-strategy.md`, `07-project-layout-makefile-conventions.md` |
+| Recursive descent parser | Zero deps; each grammar rule is one function; additive extension path for functions and variables | `parser-architecture.md` |
+| Explicit AST (not direct eval) | Clean separation of parse from evaluate; evaluator is independently testable; AST is required for future variable binding | `parser-architecture.md` |
+| `float64` as sole numeric type | Single type handles all spec cases; `isinf` detects overflow; `isclose`-to-integer check strips `.0` | `numeric-representation.md` |
+| `CalcError` exception hierarchy | One error class per variant; error messages defined in one place; layers raise errors, never write to stderr | `04-error-taxonomy-and-exit-codes.md` |
+| Lazy/pull lexer | No intermediate token list allocation; parser calls `next_token()` on demand | `lexer-design.md` |
+| `src/` layout with `uv` | Modern PyPA convention; `uv sync --frozen` gives reproducible envs on both platforms | `07-project-layout-makefile-conventions.md` |
 | Single `IDENT` token type for all named identifiers | Lexer stays context-free; constants, functions, and future variables share one token type | #38, #43, #53, #73 |
 | `COMMA` as first-class `TokenType` | Consistent with every other syntactically meaningful single-char token; avoids coupling parser to lexer's `UNKNOWN` fallthrough | #65 |
 | `Name` AST node (eval-time lookup) vs parse-time constant folding | Parser stays table-agnostic; same node type serves future user variables without parser change | #43, #56 |
@@ -118,7 +141,8 @@ AST nodes, or error-handling paths.
 objects, with no semantic interpretation.
 
 **Key interfaces:**
-- `TokenType` enum — token categories; v0.2.0 adds `IDENT` and `COMMA`
+- `TokenType` enum — `NUMBER`, `PLUS`, `MINUS`, `STAR`, `SLASH`, `LPAREN`, `RPAREN`,
+  `EOF`, `UNKNOWN`, `IDENT`, `COMMA` (11 types total)
 - `Token(type: TokenType, value: str)` dataclass
 - `Lexer(input: str)` — `next_token() -> Token`
 
@@ -135,9 +159,9 @@ representing the expression's structure.
 
 **Key interfaces:**
 - `ASTNode` union type alias: `Number | BinaryOp | UnaryOp | Name | Call`
-- `Number(value: float)`, `BinaryOp(op, left, right)`, `UnaryOp(op, operand)` — existing
-- `Name(name: str)` — new v0.2.0; bare identifier (constant or future variable)
-- `Call(func: str, args: list[ASTNode])` — new v0.2.0; function call expression
+- `Number(value: float)`, `BinaryOp(op, left, right)`, `UnaryOp(op, operand)` — arithmetic nodes
+- `Name(name: str)` — bare identifier resolved at eval time (constant or future variable)
+- `Call(func: str, args: list[ASTNode])` — function call expression
 - `Parser(lexer: Lexer)` — `parse() -> ASTNode`
 
 **Files:** `src/calc/parser.py`
@@ -176,10 +200,15 @@ messages (`UnknownFunction`, `WrongArity`) are self-contained.
 
 **Key interfaces:**
 - `CalcError(Exception)` — base class with abstract `description() -> str`
-- Existing subclasses: `ExpectedSingleArg`, `EmptyExpression`, `UnexpectedToken`,
-  `UnexpectedEnd`, `DivisionByZero`, `Overflow`
-- New v0.2.0 subclasses: `UnknownFunction(name)`, `WrongArity(name, expected)`,
-  `DomainError()`
+- `ExpectedSingleArg` — wrong number of CLI arguments
+- `EmptyExpression` — empty string argument
+- `UnexpectedToken(token)` — token where a different one was expected
+- `UnexpectedEnd` — expression ends mid-parse
+- `DivisionByZero` — division or modulo by zero
+- `Overflow` — result exceeds float range
+- `UnknownFunction(name)` — call to unregistered function name
+- `WrongArity(name, expected)` — wrong number of arguments to a function
+- `DomainError()` — argument outside function's mathematical domain
 - `error_message(e: CalcError) -> str` — returns `"error: <e.description()>"`
 
 **Files:** `src/calc/errors.py`

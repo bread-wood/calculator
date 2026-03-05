@@ -8,22 +8,43 @@
 
 ## System Overview
 
-v0.3.0 extends the calculator CLI with named variable assignment and
-multi-statement programs. A user may write `x = 5; y = x * 2; y + 1` as a
-single quoted argument; the calculator evaluates each statement in order and
-prints the value of the last statement. Variables are scoped to the single
-invocation — no state persists between runs.
+The calculator is a single-binary command-line tool (`calc`) that accepts one arithmetic
+expression — or a semicolon-separated sequence of statements — as a shell argument,
+evaluates them in order, and prints the result of the last statement to stdout. It targets
+developers who want quick calculations without leaving the terminal. The implementation is
+in Python and ships with no external runtime dependencies beyond the Python standard library.
 
-The design must also lay a forward-compatible foundation for v0.4.0 function
-parameters: the scope model introduced here must be extensible to a scope
-chain without requiring a breaking rewrite (spec constraint; confirmed viable
+The pipeline has four stages: the **Lexer** tokenises the raw input string; the **Parser**
+consumes the token stream and builds an explicit AST rooted at a `Program` node; the
+**Evaluator** executes each statement in order, maintaining a mutable variable environment;
+and the **Formatter** converts the final `float` result to a clean string for stdout. All
+errors are represented as `CalcError` subclass instances and are caught at the CLI boundary,
+which is the sole owner of stderr writes and process exit codes.
+
+The codebase has five modules: `cli` (`__main__.py`), `lexer`, `parser`, `evaluator`, and
+`errors`. They form a strict dependency chain: cli → evaluator → parser → lexer; `errors`
+has no dependencies.
+
+The evaluator supports 12 built-in mathematical functions (`sqrt`, `abs`, `floor`, `ceil`,
+`round`, `sin`, `cos`, `tan`, `log`, `exp`, `pow`, `atan2`) and 2 named constants (`pi`,
+`e`). In v0.3.0 the language is extended with named variable assignment and multi-statement
+programs: a user may write `x = 5; y = x * 2; y + 1` as a single quoted argument.
+Variables are scoped to the single invocation — no state persists between runs.
+
+The design lays a forward-compatible foundation for v0.4.0 function parameters: the scope
+model introduced here (a fresh dict per invocation, never mutating `_DEFAULT_ENV`) must be
+extensible to a scope chain without a breaking rewrite (spec constraint; confirmed viable
 by research issue #109).
 
-**Key constraints (from spec):**
-- Flat variable namespace; no block scoping in this version.
-- Named constants `pi` and `e` are read-only; reassignment raises an error.
-- Variables are evaluated eagerly and in order.
-- All v0.1.x and v0.2.x behaviour is preserved unchanged.
+**Key constraints:**
+- Single-argument invocation: `calc '<expression-or-program>'`
+- Runs on macOS and Linux with no external runtime dependencies beyond stdlib
+- `make test` must pass clean on both platforms
+- Completes any valid expression in under 100 ms
+- Flat variable namespace; no block scoping in this version
+- Named constants `pi` and `e` are read-only; reassignment raises an error
+- Variables are evaluated eagerly and in order
+- All v0.1.x and v0.2.x behaviour is preserved unchanged
 
 **Non-goals:**
 - Persistence across invocations.
@@ -101,6 +122,24 @@ result of last statement  ──►  print to stdout
 
 | Decision | Choice | Research basis |
 |---|---|---|
+| Python implementation | CI already uses `uv run pytest`; stdlib covers all requirements | `testing-strategy.md`, `07-project-layout-makefile-conventions.md` |
+| Recursive descent parser | Zero deps; each grammar rule is one function; additive extension path for functions and variables | `parser-architecture.md` |
+| Explicit AST (not direct eval) | Clean separation of parse from evaluate; evaluator is independently testable; AST is required for variable binding | `parser-architecture.md` |
+| `float64` as sole numeric type | Single type handles all spec cases; `isinf` detects overflow; `isclose`-to-integer check strips `.0` | `numeric-representation.md` |
+| `CalcError` exception hierarchy | One error class per variant; error messages defined in one place; layers raise errors, never write to stderr | `04-error-taxonomy-and-exit-codes.md` |
+| Lazy/pull lexer | No intermediate token list allocation; parser calls `next_token()` on demand | `lexer-design.md` |
+| `src/` layout with `uv` | Modern PyPA convention; `uv sync --frozen` gives reproducible envs on both platforms | `07-project-layout-makefile-conventions.md` |
+| Single `IDENT` token type for all named identifiers | Lexer stays context-free; constants, functions, and variables share one token type | #38, #43, #53, #73 |
+| `COMMA` as first-class `TokenType` | Consistent with every other syntactically meaningful single-char token; avoids coupling parser to lexer's `UNKNOWN` fallthrough | #65 |
+| `Name` AST node (eval-time lookup) vs parse-time constant folding | Parser stays table-agnostic; same node type serves user variables without parser change | #43, #56 |
+| Separate `_DEFAULT_ENV` (constants) and `_FUNCTION_TABLE` (functions) | Grammar disambiguates (`IDENT LPAREN` → `Call`; bare `IDENT` → `Name`); separate tables prevent variable shadowing of functions | #39, #43, #56 |
+| `FunctionEntry` dataclass with `domain_check` predicate | Domain constraints co-located with function entry; explicit, independently testable; avoids catching `ValueError` from `math.*` | #39, #40, #54 |
+| `float()` wrappers for `floor`/`ceil` in function table | Keeps `FunctionEntry.fn: Callable[..., float]` homogeneous; aligns with `_round_half_away` pattern | #67 |
+| `_round_half_away` helper (not built-in `round`) | Python 3 `round()` uses banker's rounding; spec requires round-half-away-from-zero (`round(2.5)` → `3`) | #41, #75 |
+| `str(value)` in `format_result` decimal branch | Gives the shortest round-trip string; matches all spec-mandated decimal outputs | #44, #57 |
+| `description()` method on `CalcError` (replaces `_MESSAGES` dict) | Parameterized errors (`UnknownFunction`, `WrongArity`) cannot be expressed with a static dict; method dispatch is uniform | #55, #68 |
+| Look-ahead guard in `_scan_number` for `e/E` | Bare `e` is a valid constant; `2e` must not produce a malformed `NUMBER("2e")` token | #66 |
+| Arity validation in evaluator (not parser) | Parser stays table-agnostic; standard pattern for interpreted languages | #54 |
 | Lookahead strategy | 2-token window (`_lookahead` slot, lazy) | #110 Option A |
 | Statement dispatch | New `_parse_statement()` method | #110 Q2 |
 | Trailing semicolons | Accepted | #110 Q3 |
@@ -123,11 +162,13 @@ result of last statement  ──►  print to stdout
 
 ### Module: lexer
 
-**Responsibility:** Convert a raw source string into a flat token stream, including the two new tokens required by v0.3.0 grammar.
+**Responsibility:** Convert a raw source string into a flat token stream with no
+semantic interpretation.
 
 **Key interfaces:**
-- `TokenType` enum — extended with `SEMICOLON` and `EQUALS`
-- `Token(type, value)` dataclass
+- `TokenType` enum — `NUMBER`, `PLUS`, `MINUS`, `STAR`, `SLASH`, `LPAREN`, `RPAREN`,
+  `EOF`, `UNKNOWN`, `IDENT`, `COMMA`, `SEMICOLON`, `EQUALS` (13 types total)
+- `Token(type: TokenType, value: str)` dataclass
 - `Lexer(source: str)` class with `next_token() → Token`
 
 **Files:** `src/calc/lexer.py`
@@ -138,11 +179,18 @@ result of last statement  ──►  print to stdout
 
 ### Module: parser
 
-**Responsibility:** Consume a token stream from `Lexer` and produce a typed AST rooted at a `Program` node.
+**Responsibility:** Consume a token stream from `Lexer` and produce a typed AST rooted
+at a `Program` node.
 
 **Key interfaces:**
-- `Assignment(name: str, value: ASTNode)` dataclass
-- `Program(body: list[Statement])` dataclass
+- `ASTNode` union type alias: `Number | BinaryOp | UnaryOp | Name | Call`
+- `Number(value: float)` — numeric literal
+- `BinaryOp(op: str, left: ASTNode, right: ASTNode)` — binary arithmetic or comparison
+- `UnaryOp(op: str, operand: ASTNode)` — unary minus
+- `Name(name: str)` — bare identifier (variable or constant lookup)
+- `Call(func: str, args: list[ASTNode])` — function call
+- `Assignment(name: str, value: ASTNode)` — variable assignment statement
+- `Program(body: list[Statement])` — sequence of statements (top-level root)
 - `Statement = Assignment | ASTNode` type alias
 - `Parser(lexer: Lexer)` class with `parse_program() → Program`
 
@@ -154,29 +202,45 @@ result of last statement  ──►  print to stdout
 
 ### Module: evaluator
 
-**Responsibility:** Walk an AST and produce a numeric result, maintaining a mutable variable environment; enforce constant protection.
+**Responsibility:** Walk the AST recursively and produce a `float` result; maintain a
+mutable variable environment across statement execution; resolve named constants and
+dispatch built-in function calls; enforce arity, domain, and constant-reassignment
+constraints; detect overflow.
 
 **Key interfaces:**
-- `evaluate(node: ASTNode, env: dict[str, float] | None) → float`
+- `evaluate(node: ASTNode, env: dict[str, float] | None = None) → float`
 - `execute_statement(stmt: Statement, env: dict[str, float]) → float | None`
-- `_CONSTANTS: frozenset[str]`
-- `_DEFAULT_ENV: MappingProxyType`
+- `format_result(value: float) → str` — `"5"` for whole results, `str(value)` for decimals
+- `_DEFAULT_ENV: MappingProxyType[str, float]` — built-in constants (`pi`, `e`); never mutated
+- `_CONSTANTS: frozenset[str]` — names that may not be reassigned (`{"pi", "e"}`)
+- `_FUNCTION_TABLE: dict[str, FunctionEntry]` — 12 built-in functions
+- `FunctionEntry(name, arity, fn, domain_check)` — frozen dataclass
 
 **Files:** `src/calc/evaluator.py`
 
-**Dependencies:** `parser` (ASTNode, Assignment), `errors` (UndefinedVariable, ConstantReassignment, and inherited errors)
+**Dependencies:** `parser` (ASTNode, Assignment), `errors` (all CalcError subclasses), `math` (stdlib)
 
 ---
 
 ### Module: errors
 
-**Responsibility:** Define the public error hierarchy; provide human-readable error descriptions.
+**Responsibility:** Define the public `CalcError` hierarchy; provide human-readable
+error descriptions via `description()` methods on each subclass.
 
 **Key interfaces:**
-- `CalcError` base class with `description() → str`
-- `UndefinedVariable(name: str)` — renamed from `UnknownName`
-- `ConstantReassignment(name: str)` — new in v0.3.0
-- All existing v0.2.x error classes unchanged
+- `CalcError(Exception)` — base class with abstract `description() → str`
+- `ExpectedSingleArg` — wrong number of CLI arguments
+- `EmptyExpression` — empty string argument
+- `UnexpectedToken(token)` — token where a different one was expected
+- `UnexpectedEnd` — expression ends mid-parse
+- `DivisionByZero` — division or modulo by zero
+- `Overflow` — result exceeds float range
+- `UnknownFunction(name)` — call to unregistered function name
+- `WrongArity(name, expected)` — wrong number of arguments to a function
+- `DomainError()` — argument outside function's mathematical domain
+- `UndefinedVariable(name: str)` — `Name` node not found in the variable environment
+- `ConstantReassignment(name: str)` — attempt to assign to a read-only constant
+- `error_message(e: CalcError) → str` — returns `"error: <e.description()>"`
 
 **Files:** `src/calc/errors.py`
 
