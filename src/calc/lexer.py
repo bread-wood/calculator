@@ -12,8 +12,10 @@ class TokenType(Enum):
     SLASH = auto()
     LPAREN = auto()
     RPAREN = auto()
+    COMMA = auto()
     EOF = auto()
     UNKNOWN = auto()
+    IDENT = auto()
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,7 @@ _SINGLE_CHAR: dict[str, TokenType] = {
     "/": TokenType.SLASH,
     "(": TokenType.LPAREN,
     ")": TokenType.RPAREN,
+    ",": TokenType.COMMA,
 }
 
 
@@ -47,6 +50,8 @@ class Lexer:
             return Token(_SINGLE_CHAR[ch], ch)
         if ch.isdigit() or ch == ".":
             return self._scan_number()
+        if ch.isalpha() or ch == "_":
+            return self._scan_ident()
         self._advance()
         return Token(TokenType.UNKNOWN, ch)
 
@@ -79,9 +84,19 @@ class Lexer:
                     self._advance()
         # optional exponent: e/E followed by optional +/- and digits
         if self._peek() in ("e", "E"):
+            saved = self._cursor
             self._advance()
             if self._peek() in ("+", "-"):
                 self._advance()
-            while self._peek().isdigit():
-                self._advance()
+            if self._peek().isdigit():
+                while self._peek().isdigit():
+                    self._advance()
+            else:
+                self._cursor = saved
         return Token(TokenType.NUMBER, self._input[start : self._cursor])
+
+    def _scan_ident(self) -> Token:
+        start = self._cursor
+        while self._peek().isalnum() or self._peek() == "_":
+            self._advance()
+        return Token(TokenType.IDENT, self._input[start : self._cursor])
