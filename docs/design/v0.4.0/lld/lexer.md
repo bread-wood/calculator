@@ -3,7 +3,8 @@
 **Module:** `lexer` (`src/calc/lexer.py`)
 **Milestone:** v0.4.0
 **Date:** 2026-03-05
-**Status:** Draft
+**Status:** Approved
+**Issue:** #189
 **Depends on:** HLD v0.4.0, Research #153, Research #158
 
 ---
