@@ -108,6 +108,43 @@ class CannotRedefineBuiltin(CalcError):
         return f"cannot redefine built-in: {self.name}"
 
 
+class UndefinedFunction(CalcError):
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(name)
+
+    def description(self) -> str:
+        return f"undefined function: {self.name}"
+
+
+class OutputWriteError(CalcError):
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
+
+    def description(self) -> str:
+        return f"cannot write output: {self.reason}"
+
+
+class UnsupportedFormat(CalcError):
+    def __init__(self, ext: str) -> None:
+        self.ext = ext
+        super().__init__(ext)
+
+    def description(self) -> str:
+        return f"unsupported format: {self.ext}; use .png or .svg"
+
+
+class DomainEmpty(CalcError):
+    def description(self) -> str:
+        return "expression undefined over entire domain"
+
+
+class InvalidDomainBounds(CalcError):
+    def description(self) -> str:
+        return "xmin must be less than xmax"
+
+
 def error_message(e: CalcError) -> str:
     try:
         return f"error: {e.description()}"
