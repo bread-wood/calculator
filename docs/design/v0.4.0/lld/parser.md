@@ -2,7 +2,7 @@
 
 **Milestone:** v0.4.0
 **Module:** `parser` (`src/calc/parser.py`)
-**Issue:** #184
+**Issue:** #190
 **Date:** 2026-03-05
 **Status:** Draft
 
