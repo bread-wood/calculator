@@ -4,13 +4,8 @@ import math
 import statistics
 from dataclasses import dataclass
 
+from calc.errors import CalcError, DomainEmpty
 from calc.evaluator import evaluate, _CONSTANTS_VALUES
-from calc.errors import CalcError
-
-
-class DomainEmpty(CalcError):
-    def description(self) -> str:
-        return "expression undefined over entire domain"
 
 
 @dataclass(frozen=True)
