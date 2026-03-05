@@ -13,6 +13,8 @@ from calc.errors import (
     WrongArity,
     UndefinedVariable,
     ConstantReassignment,
+    FunctionAlreadyDefined,
+    CannotRedefineBuiltin,
 )
 
 
@@ -56,15 +58,15 @@ def test_domain_error_message():
 
 
 def test_unknown_function_message():
-    assert error_message(UnknownFunction("sqrt")) == "error: unknown function 'sqrt'"
+    assert error_message(UnknownFunction("sqrt")) == "error: undefined function: sqrt"
 
 
 def test_wrong_arity_singular():
-    assert error_message(WrongArity("abs", 1)) == "error: 'abs' expects 1 argument"
+    assert error_message(WrongArity("abs", 1)) == "error: wrong number of arguments: abs expects 1 argument"
 
 
 def test_wrong_arity_plural():
-    assert error_message(WrongArity("pow", 2)) == "error: 'pow' expects 2 arguments"
+    assert error_message(WrongArity("pow", 2)) == "error: wrong number of arguments: pow expects 2 arguments"
 
 
 def test_undefined_variable_message():
@@ -110,3 +112,50 @@ def test_constant_reassignment_no_quotes_in_message():
 
 def test_constant_reassignment_inherits_calc_error():
     assert issubclass(ConstantReassignment, CalcError)
+
+
+# v0.4.0 — user-defined functions
+def test_function_already_defined_message():
+    assert error_message(FunctionAlreadyDefined("f")) == "error: function already defined: f"
+
+
+def test_cannot_redefine_builtin_message():
+    assert error_message(CannotRedefineBuiltin("sqrt")) == "error: cannot redefine built-in: sqrt"
+
+
+def test_unknown_function_no_quotes():
+    msg = error_message(UnknownFunction("myFunc"))
+    assert "'" not in msg and "myFunc" in msg
+
+
+def test_wrong_arity_no_quotes_around_name():
+    msg = error_message(WrongArity("myFunc", 2))
+    assert "'" not in msg and "myFunc" in msg
+
+
+def test_wrong_arity_new_prefix():
+    assert error_message(WrongArity("f", 1)).startswith("error: wrong number of arguments:")
+
+
+def test_function_already_defined_stores_name():
+    assert FunctionAlreadyDefined("g").name == "g"
+
+
+def test_cannot_redefine_builtin_stores_name():
+    assert CannotRedefineBuiltin("sin").name == "sin"
+
+
+def test_function_already_defined_is_calc_error():
+    assert isinstance(FunctionAlreadyDefined("f"), CalcError)
+
+
+def test_cannot_redefine_builtin_is_calc_error():
+    assert isinstance(CannotRedefineBuiltin("sin"), CalcError)
+
+
+def test_function_already_defined_not_subclass_of_cannot_redefine():
+    assert not issubclass(FunctionAlreadyDefined, CannotRedefineBuiltin)
+
+
+def test_cannot_redefine_not_subclass_of_function_already_defined():
+    assert not issubclass(CannotRedefineBuiltin, FunctionAlreadyDefined)
