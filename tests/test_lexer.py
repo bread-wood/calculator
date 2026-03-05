@@ -87,6 +87,8 @@ def test_number_literals(src, value):
         ("(", TokenType.LPAREN),
         (")", TokenType.RPAREN),
         (",", TokenType.COMMA),
+        (";", TokenType.SEMICOLON),
+        ("=", TokenType.EQUALS),
     ],
 )
 def test_single_char_operators(ch, tt):
@@ -195,5 +197,55 @@ def test_constant_in_expression():
         Token(TokenType.NUMBER, "2"),
         Token(TokenType.STAR,   "*"),
         Token(TokenType.IDENT,  "pi"),
+        Token(TokenType.EOF,    ""),
+    ]
+
+
+def test_semicolon_token():
+    t = Lexer(";").next_token()
+    assert t == Token(TokenType.SEMICOLON, ";")
+
+
+def test_equals_token():
+    t = Lexer("=").next_token()
+    assert t == Token(TokenType.EQUALS, "=")
+
+
+def test_assignment_token_sequence():
+    tokens = tokenize("x = 5")
+    assert tokens == [
+        Token(TokenType.IDENT,   "x"),
+        Token(TokenType.EQUALS,  "="),
+        Token(TokenType.NUMBER,  "5"),
+        Token(TokenType.EOF,     ""),
+    ]
+
+
+def test_multi_statement_token_sequence():
+    tokens = tokenize("x = 5; y = 2")
+    assert tokens == [
+        Token(TokenType.IDENT,      "x"),
+        Token(TokenType.EQUALS,     "="),
+        Token(TokenType.NUMBER,     "5"),
+        Token(TokenType.SEMICOLON,  ";"),
+        Token(TokenType.IDENT,      "y"),
+        Token(TokenType.EQUALS,     "="),
+        Token(TokenType.NUMBER,     "2"),
+        Token(TokenType.EOF,        ""),
+    ]
+
+
+def test_trailing_semicolon():
+    tokens = tokenize("x = 5;")
+    assert tokens[-2] == Token(TokenType.SEMICOLON, ";")
+    assert tokens[-1] == Token(TokenType.EOF, "")
+
+
+def test_variable_reference_in_expression():
+    tokens = tokenize("x * 2")
+    assert tokens == [
+        Token(TokenType.IDENT,  "x"),
+        Token(TokenType.STAR,   "*"),
+        Token(TokenType.NUMBER, "2"),
         Token(TokenType.EOF,    ""),
     ]
