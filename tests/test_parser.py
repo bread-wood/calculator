@@ -2,7 +2,7 @@ import pytest
 
 from calc.errors import UnexpectedEnd, UnexpectedToken
 from calc.lexer import Lexer
-from calc.parser import Assignment, BinaryOp, Call, Name, Number, Parser, Program, UnaryOp
+from calc.parser import Assignment, BinaryOp, Call, FunctionDef, Name, Number, Parser, Program, UnaryOp
 
 
 def parse(expr: str):
@@ -185,3 +185,78 @@ def test_assignment_with_expr_rhs():
         Assignment("x", Number(5.0)),
         Assignment("y", BinaryOp("*", Name("x"), Number(2.0))),
     ])
+
+
+# v0.4.0 — user-defined functions
+
+def test_funcdef_no_params():
+    prog = parse_program("def f() = 1")
+    assert prog.body[0] == FunctionDef(name="f", params=[], body=Number(1.0))
+
+
+def test_funcdef_one_param():
+    prog = parse_program("def f(x) = x")
+    assert prog.body[0] == FunctionDef(name="f", params=["x"], body=Name("x"))
+
+
+def test_funcdef_multi_params():
+    prog = parse_program("def f(x, y) = x + y")
+    assert prog.body[0] == FunctionDef(
+        name="f", params=["x", "y"], body=BinaryOp("+", Name("x"), Name("y"))
+    )
+
+
+def test_funcdef_body_expression():
+    prog = parse_program("def g(x) = x * 2 + 1")
+    assert prog.body[0] == FunctionDef(
+        name="g",
+        params=["x"],
+        body=BinaryOp("+", BinaryOp("*", Name("x"), Number(2.0)), Number(1.0)),
+    )
+
+
+def test_funcdef_followed_by_call():
+    prog = parse_program("def f(x) = x; f(3)")
+    assert prog.body[0] == FunctionDef(name="f", params=["x"], body=Name("x"))
+    assert prog.body[1] == Call(func="f", args=[Number(3.0)])
+
+
+def test_call_in_expression():
+    assert parse("f(1) + 2") == BinaryOp("+", Call("f", [Number(1.0)]), Number(2.0))
+
+
+def test_funcdef_body_uses_call():
+    prog = parse_program("def h(x) = sqrt(x)")
+    assert prog.body[0] == FunctionDef(
+        name="h", params=["x"], body=Call("sqrt", [Name("x")])
+    )
+
+
+def test_funcdef_missing_name():
+    with pytest.raises(UnexpectedToken):
+        parse_program("def (x) = 1")
+
+
+def test_funcdef_missing_lparen():
+    with pytest.raises(UnexpectedToken):
+        parse_program("def f x) = 1")
+
+
+def test_funcdef_non_ident_param():
+    with pytest.raises(UnexpectedToken):
+        parse_program("def f(x + 1) = x")
+
+
+def test_funcdef_missing_rparen():
+    with pytest.raises((UnexpectedToken, UnexpectedEnd)):
+        parse_program("def f(x = 1")
+
+
+def test_funcdef_missing_equals():
+    with pytest.raises((UnexpectedToken, UnexpectedEnd)):
+        parse_program("def f(x) 1")
+
+
+def test_funcdef_empty_body():
+    with pytest.raises(UnexpectedEnd):
+        parse_program("def f(x) =")
