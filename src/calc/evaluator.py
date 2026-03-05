@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from calc.parser import ASTNode, Number, BinaryOp, UnaryOp, Name, Call
-from calc.errors import DivisionByZero, Overflow, DomainError, UnknownFunction, WrongArity, UnknownName
+from calc.errors import DivisionByZero, Overflow, DomainError, UnknownFunction, WrongArity, UndefinedVariable
 
 
 def _round_half_away(x: float) -> float:
@@ -73,7 +73,7 @@ def evaluate(node: ASTNode, env: dict[str, float] | None = None) -> float:
 
     if isinstance(node, Name):
         if node.name not in env:
-            raise UnknownName(node.name)
+            raise UndefinedVariable(node.name)
         return env[node.name]
 
     if isinstance(node, Call):
