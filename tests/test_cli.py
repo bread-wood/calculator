@@ -77,7 +77,7 @@ def test_empty_expression():
 
 
 def test_unexpected_token():
-    r = run_calc("abc")
+    r = run_calc("@")
     assert r.stdout == ""
     assert r.stderr.strip() == error_message(UnexpectedToken())
     assert r.returncode == 1
