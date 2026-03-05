@@ -3,7 +3,7 @@ import sys
 from calc.errors import CalcError, ExpectedSingleArg, EmptyExpression, error_message
 from calc.lexer import Lexer
 from calc.parser import Parser
-from calc.evaluator import execute_statement, format_result, _DEFAULT_ENV
+from calc.evaluator import execute_statement, format_result, _DEFAULT_ENV, UserFunction
 
 
 def main() -> None:
@@ -28,15 +28,19 @@ def main() -> None:
         lexer = Lexer(expression)
         program = Parser(lexer).parse_program()
         env: dict[str, float] = dict(_DEFAULT_ENV)
-        last_result = 0.0
+        fn_env: dict[str, UserFunction] = {}
+        last_result: float | None = None
         for stmt in program.body:
-            last_result = execute_statement(stmt, env)
+            result = execute_statement(stmt, env, fn_env)
+            if result is not None:
+                last_result = result
     except CalcError as e:
         print(error_message(e), file=sys.stderr)
         sys.exit(1)
 
     # 4. Output
-    print(format_result(last_result))
+    if last_result is not None:
+        print(format_result(last_result))
 
 
 if __name__ == "__main__":
