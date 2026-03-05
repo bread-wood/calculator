@@ -18,6 +18,7 @@ class TokenType(Enum):
     IDENT = auto()
     SEMICOLON = auto()
     EQUALS = auto()
+    DEF = auto()
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,10 @@ _SINGLE_CHAR: dict[str, TokenType] = {
     ",": TokenType.COMMA,
     ";": TokenType.SEMICOLON,
     "=": TokenType.EQUALS,
+}
+
+_KEYWORDS: dict[str, TokenType] = {
+    "def": TokenType.DEF,
 }
 
 
@@ -103,4 +108,5 @@ class Lexer:
         start = self._cursor
         while self._peek().isalnum() or self._peek() == "_":
             self._advance()
-        return Token(TokenType.IDENT, self._input[start:self._cursor])
+        text = self._input[start:self._cursor]
+        return Token(_KEYWORDS.get(text, TokenType.IDENT), text)
