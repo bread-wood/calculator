@@ -24,7 +24,18 @@ class UnaryOp:
     operand: ASTNode
 
 
-ASTNode = Number | BinaryOp | UnaryOp
+@dataclass
+class Name:
+    name: str
+
+
+@dataclass
+class Call:
+    func: str
+    args: list[ASTNode]
+
+
+ASTNode = Number | BinaryOp | UnaryOp | Name | Call
 
 
 class Parser:
@@ -91,6 +102,24 @@ class Parser:
             node = self._parse_expr()
             self._expect(TokenType.RPAREN)
             return node
+        if self._current.type == TokenType.IDENT:
+            name = self._advance().value
+            if self._current.type == TokenType.LPAREN:
+                self._advance()                # consume '('
+                args = self._parse_arglist()
+                self._expect(TokenType.RPAREN)
+                return Call(func=name, args=args)
+            return Name(name=name)
         if self._current.type == TokenType.EOF:
             raise UnexpectedEnd()
         raise UnexpectedToken()
+
+    def _parse_arglist(self) -> list[ASTNode]:
+        args: list[ASTNode] = []
+        if self._current.type == TokenType.RPAREN:
+            return args                    # zero-argument call: f()
+        args.append(self._parse_expr())
+        while self._current.type == TokenType.COMMA:
+            self._advance()                # consume ','
+            args.append(self._parse_expr())
+        return args
