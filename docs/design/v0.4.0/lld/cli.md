@@ -1,343 +1,347 @@
-# Low-Level Design — `cli` module (v0.4.0)
+# Low-Level Design — `cli` Module (v0.4.0)
 
-**Module:** `cli` (`src/calc/__main__.py`)
 **Milestone:** v0.4.0
 **Date:** 2026-03-05
 **Status:** Draft
-**HLD ref:** `docs/design/v0.4.0/HLD.md` §Module: cli
+**Issue:** #193
 
 ---
 
-## 1. Responsibilities
+## 1. Responsibility
 
-The `cli` module is the sole entry point of the `calc` binary. It owns:
+The `cli` module (`src/calc/__main__.py`) is the entry point of the `calc` binary. Its
+responsibilities are:
 
-1. Validating CLI arguments (exactly one positional argument required).
-2. Driving the lex → parse → execute pipeline.
-3. Initialising both the variable environment (`env`) and the function environment
-   (`fn_env`) before the statement loop.
-4. Threading `env` and `fn_env` through each statement in `Program.body`.
-5. Tracking the last non-`None` result across statements.
-6. Writing the final result to stdout (or nothing, if every statement was a `def`).
-7. Catching all `CalcError` exceptions, writing `"error: <description>"` to stderr,
-   and exiting with code 1.
-8. Exiting with code 0 on success.
+1. Validate CLI arguments and raise `ExpectedSingleArg` or `EmptyExpression` early.
+2. Drive the lex → parse → execute pipeline by constructing a `Lexer`, calling
+   `parse_program()`, and iterating `Program.body`.
+3. Initialise `env: dict[str, float]` and `fn_env: dict[str, UserFunction]` before
+   the statement loop and thread both through every `execute_statement()` call.
+4. Track the result of the last expression statement; suppress stdout when all
+   statements are `def` statements (last result is `None`).
+5. Write the formatted result to stdout on success.
+6. Catch any `CalcError`, write `error_message(e)` to stderr, and exit with code 1.
 
-The module does **not** own: tokenisation, parsing, AST evaluation, error message
-text, or user function storage — those belong to `lexer`, `parser`, `evaluator`, and
-`errors` respectively.
+The CLI is the **sole owner** of stderr writes and process exit codes. No other module
+writes to stderr or calls `sys.exit`.
 
 ---
 
-## 2. File
+## 2. Data Structures
+
+### 2.1 `env: dict[str, float]`
+
+A mutable dictionary mapping variable names (strings) to `float` values. Initialised
+once per invocation from `dict(_DEFAULT_ENV)`, which seeds it with the built-in
+constants `pi` and `e`. Each `Assignment` statement in the program updates this dict
+in-place. The dict is created inside `main()` — not delegated to a factory — to keep
+the full invocation lifecycle visible in one function.
+
+### 2.2 `fn_env: dict[str, UserFunction]`
+
+A mutable dictionary mapping user-defined function names (strings) to `UserFunction`
+dataclass instances. Initialised as an empty `{}` inside `main()`. Each `FunctionDef`
+statement adds one entry. The dict is passed by reference to every `execute_statement()`
+call; each call may mutate it.
+
+Both `env` and `fn_env` are created fresh per invocation. There is no module-level
+mutable state in `__main__.py`.
+
+### 2.3 `last_result: float | None`
+
+A local variable in `main()`, initialised to `None`. Updated to the return value of
+`execute_statement()` only when that value is not `None` (i.e. only for expression
+statements and assignments, not for `def` statements). After the statement loop, if
+`last_result is None` (the entire program consisted only of `def` statements), no
+output is written to stdout.
+
+---
+
+## 3. Public API / Interfaces
+
+### 3.1 `main() -> None`
+
+The single public function exported by `__main__.py`. Called by the `[project.scripts]`
+entry point (`calc = "calc.__main__:main"`) and by the `if __name__ == "__main__":` guard.
+
+```python
+def main() -> None:
+    ...
+```
+
+Return type is `None`; all output channels are side effects (stdout, stderr, sys.exit).
+
+### 3.2 `__main__.py` as a runnable module
+
+`python -m calc` invokes `main()` via the standard `if __name__ == "__main__": main()`
+guard. The `calc` binary invokes the same `main()` function through the entry-point
+machinery. Both paths are identical.
+
+### 3.3 Imports
+
+```python
+import sys
+from calc.lexer import Lexer
+from calc.parser import Parser
+from calc.evaluator import (
+    execute_statement,
+    format_result,
+    _DEFAULT_ENV,
+    UserFunction,
+)
+from calc.errors import (
+    CalcError,
+    ExpectedSingleArg,
+    EmptyExpression,
+    error_message,
+)
+```
+
+No imports from `calc.parser` node types are needed in `__main__.py`; the CLI treats
+all statement types opaquely and dispatches via `execute_statement`.
+
+---
+
+## 4. Key Algorithms
+
+### 4.1 Argument validation
+
+```python
+if len(sys.argv) != 2:
+    raise ExpectedSingleArg()
+source = sys.argv[1]
+if not source.strip():
+    raise EmptyExpression()
+```
+
+- `len(sys.argv) != 2` catches both too-few and too-many arguments (`sys.argv[0]` is
+  the program name).
+- The `strip()` check on `source` catches the empty-string and all-whitespace cases
+  before handing off to the lexer.
+
+### 4.2 Pipeline construction
+
+```python
+lexer = Lexer(source)
+program = Parser(lexer).parse_program()
+```
+
+`Lexer` is constructed once and consumed by `Parser.parse_program()`. The resulting
+`Program.body` is a list of `Statement` nodes (each a `Assignment | FunctionDef | ASTNode`).
+
+### 4.3 Environment initialisation
+
+```python
+env: dict[str, float] = dict(_DEFAULT_ENV)
+fn_env: dict[str, UserFunction] = {}
+```
+
+`dict(_DEFAULT_ENV)` creates a mutable copy of the `MappingProxyType` constant. The
+original `_DEFAULT_ENV` is never mutated. `fn_env` starts empty; user-defined functions
+accumulate into it during the statement loop.
+
+### 4.4 Statement loop
+
+```python
+last_result: float | None = None
+for stmt in program.body:
+    result = execute_statement(stmt, env, fn_env)
+    if result is not None:
+        last_result = result
+```
+
+- `execute_statement` returns `float` for expression and assignment statements,
+  `None` for `def` statements.
+- Only non-`None` returns update `last_result`, so a trailing `def` statement does not
+  suppress the result of an earlier expression.
+- Both `env` and `fn_env` are passed by reference; mutations accumulate across
+  iterations.
+
+### 4.5 Output
+
+```python
+if last_result is not None:
+    print(format_result(last_result))
+```
+
+- `format_result` produces `"5"` for whole-number floats and `str(value)` for decimals.
+- If every statement in the program was a `def` (so `last_result` remains `None`),
+  nothing is written to stdout and the process exits 0.
+
+### 4.6 Error handling
+
+```python
+except CalcError as e:
+    print(error_message(e), file=sys.stderr)
+    sys.exit(1)
+```
+
+- A single `except CalcError` block at the top of `main()` catches any error raised
+  anywhere in the pipeline (argument validation, lexing, parsing, evaluation).
+- `error_message(e)` returns `"error: <e.description()>"`.
+- `sys.exit(1)` is called only inside this except block; successful execution exits 0
+  via normal function return.
+
+### 4.7 Complete `main()` structure
+
+```python
+def main() -> None:
+    try:
+        if len(sys.argv) != 2:
+            raise ExpectedSingleArg()
+        source = sys.argv[1]
+        if not source.strip():
+            raise EmptyExpression()
+
+        lexer = Lexer(source)
+        program = Parser(lexer).parse_program()
+
+        env: dict[str, float] = dict(_DEFAULT_ENV)
+        fn_env: dict[str, UserFunction] = {}
+
+        last_result: float | None = None
+        for stmt in program.body:
+            result = execute_statement(stmt, env, fn_env)
+            if result is not None:
+                last_result = result
+
+        if last_result is not None:
+            print(format_result(last_result))
+
+    except CalcError as e:
+        print(error_message(e), file=sys.stderr)
+        sys.exit(1)
+```
+
+---
+
+## 5. Error Handling
+
+The CLI is the top-level error boundary. Every `CalcError` subclass that can be raised
+anywhere in the pipeline propagates unimpeded to the `except CalcError` handler in
+`main()`. No error is caught and re-raised at an intermediate layer.
+
+| Error class | Raise site | CLI visible condition |
+|---|---|---|
+| `ExpectedSingleArg` | `main()` | `len(sys.argv) != 2` |
+| `EmptyExpression` | `main()` | `sys.argv[1].strip() == ""` |
+| `UnexpectedToken` | `lexer.py`, `parser.py` | Malformed input |
+| `UnexpectedEnd` | `parser.py` | Input ends mid-expression |
+| `DivisionByZero` | `evaluator.py` | Division or modulo by zero at runtime |
+| `Overflow` | `evaluator.py` | Float overflow at runtime |
+| `DomainError` | `evaluator.py` | Argument outside built-in function's domain |
+| `UnknownFunction` | `evaluator.py` | Call to undefined name; also at `def`-body walk time |
+| `WrongArity` | `evaluator.py` | Argument count mismatch at call time |
+| `UndefinedVariable` | `evaluator.py` | Bare name not in `env` |
+| `ConstantReassignment` | `evaluator.py` | Assignment to `pi` or `e` |
+| `FunctionAlreadyDefined` | `evaluator.py` | Duplicate `def` for same name |
+| `CannotRedefineBuiltin` | `evaluator.py` | `def` targeting a built-in name |
+
+All error paths produce exactly one line on stderr (`"error: <description>"`) and exit
+code 1. Successful execution produces at most one line on stdout and exits 0.
+
+---
+
+## 6. File Layout
 
 ```
 src/calc/__main__.py
 ```
 
-No other files are added or modified for this module.
+Single file, no submodules. The file contains:
+
+1. Module-level imports (stdlib first, then `calc.*`)
+2. `main()` function
+3. `if __name__ == "__main__": main()` guard
+
+No module-level mutable state. No helper functions beyond `main()`.
 
 ---
 
-## 3. Data structures
+## 7. Test Strategy
 
-### 3.1 `env: dict[str, float]`
+Tests live in `tests/test_cli.py`. A `# v0.4.0 — user-defined functions` block is
+appended to the existing file after the v0.3.0 block.
 
-Mutable variable environment. Initialised from `dict(_DEFAULT_ENV)` (a shallow copy
-of the `MappingProxyType` constant in `evaluator.py`) so that built-in named
-constants (`pi`, `e`) are available on first use. Updated in-place by each
-`Assignment` statement during the loop.
+### 7.1 Testing approach
 
-- **Key:** identifier name (str)
-- **Value:** current numeric value (float)
-- **Scope:** single invocation; discarded after `main()` returns
-- **Mutation:** `execute_statement` writes to it; `main()` never reads it directly
+`test_cli.py` uses a `run_calc(source)` helper that invokes the `calc` binary (or
+`python -m calc`) as a subprocess and returns `(stdout, stderr, exit_code)`. All CLI
+tests operate end-to-end through this helper, exercising the full pipeline from argument
+to output. This is in contrast to `test_evaluator.py`, which tests the evaluator layer
+in isolation.
 
-### 3.2 `fn_env: dict[str, UserFunction]`
+Individual named `test_` functions are used throughout; `@pytest.mark.parametrize` is
+not used for CLI tests. This matches the existing v0.3.0 test convention and produces
+self-documenting failure messages.
 
-Mutable function environment. Initialised to `{}`. Populated in-place by each
-`FunctionDef` statement.
+### 7.2 Success criteria tests (12 functions)
 
-- **Key:** function name (str)
-- **Value:** `UserFunction` dataclass (defined in `evaluator.py`)
-- **Scope:** single invocation; discarded after `main()` returns
-- **Mutation:** `execute_statement` writes to it; `main()` never reads it directly
+Each of the 12 v0.4.0 spec success criteria maps to one named test function:
 
-### 3.3 `last_result: float | None`
+| Test function | Input | Expected stdout |
+|---|---|---|
+| `test_function_definition_no_output` | `"def f(x) = x"` | `""` (empty) |
+| `test_function_call_single_arg` | `"def f(x) = x; f(3)"` | `"3"` |
+| `test_function_call_multi_arg` | `"def add(a, b) = a + b; add(2, 3)"` | `"5"` |
+| `test_function_body_uses_parameter` | `"def double(x) = x * 2; double(4)"` | `"8"` |
+| `test_function_call_result_in_expression` | `"def f(x) = x + 1; f(2) + f(3)"` | `"7"` |
+| `test_function_body_uses_builtin` | `"def s(x) = sqrt(x); s(9)"` | `"3"` |
+| `test_function_body_uses_constant` | `"def r(x) = x * pi; r(1)"` | stdout contains `pi` value |
+| `test_function_call_from_another_function` | `"def f(x) = x + 1; def g(x) = f(x) * 2; g(3)"` | `"8"` |
+| `test_function_zero_params` | `"def one() = 1; one()"` | `"1"` |
+| `test_function_shadows_variable_namespace` | `"x = 5; def x(a) = a; x(2)"` | `"2"` |
+| `test_function_definition_exits_zero` | `"def f(x) = x"` | exit code 0 |
+| `test_all_defs_no_stdout` | `"def f(x) = x; def g(x) = f(x)"` | `""` |
 
-Local variable in `main()`. Tracks the result of the most recent statement that
-returned a numeric value. Initialised to `None`. Updated only when
-`execute_statement` returns a non-`None` value.
+### 7.3 Failure mode tests (≥4 functions)
 
-- `None` before any statement executes.
-- `None` throughout a program consisting exclusively of `def` statements.
-- Set to the `float` returned by the last `Assignment` or expression statement.
+| Test function | Input | Expected stderr contains | Exit code |
+|---|---|---|---|
+| `test_function_already_defined_error` | `"def f(x) = x; def f(x) = x + 1"` | `"function already defined: f"` | 1 |
+| `test_cannot_redefine_builtin_error` | `"def sqrt(x) = x"` | `"cannot redefine built-in: sqrt"` | 1 |
+| `test_forward_reference_error` | `"def f(x) = g(x); def g(x) = x"` | `"undefined function: g"` | 1 |
+| `test_wrong_arity_user_function` | `"def f(x) = x; f(1, 2)"` | `"wrong number of arguments"` | 1 |
+| `test_unknown_function_error` | `"f(1)"` | `"undefined function: f"` | 1 |
 
----
+### 7.4 Regression tests
 
-## 4. Key algorithm: `main()`
+All existing `test_cli.py` tests must continue to pass without modification, with the
+sole exception of any test that asserts the old `UnknownFunction` or `WrongArity`
+message strings. Those three assertions are updated as part of the `errors.py` changes
+(tracked separately in the `errors` implementation issue; see research #159, §Q4).
 
-```
-def main() -> None:
-    1. if len(sys.argv) != 2:
-           print(error_message(ExpectedSingleArg()), file=sys.stderr)
-           sys.exit(1)
+No existing test is deleted. The v0.4.0 block is a pure addition.
 
-    2. source = sys.argv[1]
+### 7.5 What is not tested in `test_cli.py`
 
-    3. try:
-           lexer   = Lexer(source)
-           parser  = Parser(lexer)
-           program = parser.parse_program()
-
-           env:     dict[str, float]       = dict(_DEFAULT_ENV)
-           fn_env:  dict[str, UserFunction] = {}
-
-           last_result: float | None = None
-
-           for stmt in program.body:
-               result = execute_statement(stmt, env, fn_env)
-               if result is not None:
-                   last_result = result
-
-           if last_result is not None:
-               print(format_result(last_result))
-
-       except CalcError as e:
-           print(error_message(e), file=sys.stderr)
-           sys.exit(1)
-```
-
-**Notes:**
-
-- `ExpectedSingleArg` validation happens **before** the `try` block so the argument
-  count check itself is not obscured by the generic `CalcError` handler. (The
-  `ExpectedSingleArg` path also calls `sys.exit(1)` directly; it is not raised as an
-  exception in this path.)
-- The single `except CalcError` block catches every downstream error including new
-  v0.4.0 errors (`FunctionAlreadyDefined`, `CannotRedefineBuiltin`) — no changes
-  needed to the error-handling block for new error types.
-- `format_result` is called only once, on the final result, just before printing.
-- If `last_result is None` (all statements were `def` statements), no output is
-  written to stdout and the process exits 0.
-
-### 4.1 Resolution of HLD open question #5
-
-> Whether `fn_env` is constructed inside `main()` or delegated to a factory in
-> `evaluator.py`.
-
-**Decision: constructed inside `main()`.**
-
-`fn_env` is an ordinary `dict` literal `{}`. There is no logic to encapsulate; a
-factory function would add indirection without benefit. `env` follows the same
-pattern (`dict(_DEFAULT_ENV)`). Symmetry and simplicity favour local construction.
-
-> Exact guard condition for suppressing stdout when `last_result is None`.
-
-**Decision: `if last_result is not None:`**
-
-This is the minimal, direct expression of the condition. An all-`def` program
-legitimately has no numeric output; the guard must cover both the "no statements"
-edge case and the "all statements were defs" case with the same expression.
+- Internal `env`/`fn_env` state after each statement — tested in `test_evaluator.py`
+  via direct `execute_statement` calls.
+- `FunctionDef` AST node shape — tested in `test_parser.py`.
+- `DEF` token emission — tested in `test_lexer.py`.
+- Error class `description()` strings — tested in `test_errors.py`.
 
 ---
 
-## 5. Public API / interfaces
+## 8. Open Questions Resolved
 
-### 5.1 Imports consumed
+From HLD §Open Questions item 5:
 
-| Symbol | Source module |
-|--------|--------------|
-| `sys` | stdlib |
-| `Lexer` | `calc.lexer` |
-| `Parser` | `calc.parser` |
-| `execute_statement` | `calc.evaluator` |
-| `format_result` | `calc.evaluator` |
-| `_DEFAULT_ENV` | `calc.evaluator` |
-| `UserFunction` | `calc.evaluator` |
-| `CalcError` | `calc.errors` |
-| `ExpectedSingleArg` | `calc.errors` |
-| `error_message` | `calc.errors` |
+> **`cli` LLD** — Whether `fn_env` is constructed inside `main()` or delegated to a
+> factory in `evaluator.py`; exact guard condition for suppressing stdout when
+> `last_result is None`.
 
-`UserFunction` is imported for the type annotation of `fn_env` only; it is not
-instantiated in `main()`.
+**Resolved:**
 
-### 5.2 Exported interface
+- `fn_env` is constructed as `{}` directly inside `main()`. Delegating to an
+  `evaluator` factory would add indirection without benefit; the construction is a
+  single expression with no logic to encapsulate. Both `env` and `fn_env` are
+  initialised in the same two lines, making the invocation lifecycle self-contained
+  and readable.
 
-The module exports a single callable:
-
-```python
-def main() -> None: ...
-```
-
-`__main__.py` also contains:
-
-```python
-if __name__ == "__main__":
-    main()
-```
-
-No other names are exported. The module is not intended for use as a library.
-
----
-
-## 6. Error handling
-
-### 6.1 Argument count error
-
-Checked before entering the pipeline. Uses `len(sys.argv) != 2`.
-
-```
-$ calc
-error: expected a single expression argument
-```
-
-```
-$ calc '1+2' extra
-error: expected a single expression argument
-```
-
-Exit code: 1. Output on stderr.
-
-### 6.2 All other errors
-
-All `CalcError` subclasses are caught by a single `except CalcError as e:` block.
-The handler:
-
-1. Calls `error_message(e)` → `"error: " + e.description()`
-2. Writes the string to `sys.stderr`
-3. Calls `sys.exit(1)`
-
-This includes all v0.4.0 errors without any modification to the handler:
-
-| Error | Trigger |
-|-------|---------|
-| `FunctionAlreadyDefined(name)` | Second `def` for the same name |
-| `CannotRedefineBuiltin(name)` | `def` targeting a built-in function name |
-| `UnknownFunction(name)` | Call to undefined function (at definition time or eval time) |
-| `WrongArity(name, expected)` | Call with wrong argument count |
-
-### 6.3 Stdout / stderr contract
-
-- Success output → stdout only, no trailing label
-- Error output → stderr only, prefixed `"error: "`
-- Exit 0 on success (including all-`def` programs)
-- Exit 1 on any `CalcError`
-
----
-
-## 7. Control flow diagram
-
-```
-main()
-  │
-  ├─ len(sys.argv) != 2 ──► stderr + exit(1)
-  │
-  ├─ Lexer(source)
-  ├─ Parser(lexer).parse_program() → Program
-  │      │
-  │      └─ CalcError ──► stderr + exit(1)
-  │
-  ├─ env  = dict(_DEFAULT_ENV)
-  ├─ fn_env = {}
-  ├─ last_result = None
-  │
-  └─ for stmt in program.body:
-         │
-         ├─ execute_statement(stmt, env, fn_env) → float | None
-         │      │
-         │      └─ CalcError ──► stderr + exit(1)
-         │
-         └─ if result is not None: last_result = result
-                │
-  ┌────────────┘
-  │
-  ├─ last_result is not None ──► print(format_result(last_result)) → stdout
-  └─ last_result is None     ──► (no output)
-
-exit(0)
-```
-
----
-
-## 8. Test strategy
-
-Tests live in `tests/test_cli.py`. A new `# v0.4.0 — user-defined functions` block
-is appended. No new test file is created (research #159).
-
-All test functions use the existing `run_calc(args)` helper, which captures stdout,
-stderr, and the exit code.
-
-### 8.1 Success cases (12 named functions)
-
-Each function maps 1:1 to a v0.4.0 spec success criterion.
-
-| Test function name | What it asserts |
-|--------------------|-----------------|
-| `test_function_definition_no_output` | `def f(x) = x; 0` → only `"0"` on stdout (def produces no output) |
-| `test_function_definition_only_no_output` | `def f(x) = x` → empty stdout, exit 0 |
-| `test_function_call_single_arg` | `def double(x) = x*2; double(3)` → `"6"` |
-| `test_function_call_multi_arg` | `def add(a,b) = a+b; add(3,4)` → `"7"` |
-| `test_function_body_uses_parameter` | `def sq(x) = x*x; sq(5)` → `"25"` |
-| `test_function_call_result_in_expression` | `def inc(x) = x+1; inc(2)*3` → `"9"` |
-| `test_function_uses_builtin_constant` | `def circ(r) = 2*pi*r; circ(1)` → `format_result(2*math.pi)` |
-| `test_function_uses_builtin_function` | `def f(x) = sqrt(x); f(4)` → `"2"` |
-| `test_function_calls_earlier_function` | `def sq(x)=x*x; def cube(x)=sq(x)*x; cube(3)` → `"27"` |
-| `test_function_zero_params` | `def one() = 1; one()` → `"1"` |
-| `test_function_shadows_no_variable` | `x=5; def f(x)=x*2; f(3)` → `"6"` (body param, not outer var) |
-| `test_function_and_variable_same_name` | `f=9; def f(x)=x+1; f(2)` → `"3"` (separate namespaces) |
-
-### 8.2 Error / failure cases (≥ 4 named functions)
-
-| Test function name | Expected stderr fragment | Exit code |
-|--------------------|--------------------------|-----------|
-| `test_function_already_defined_error` | `"error: function already defined: f"` | 1 |
-| `test_cannot_redefine_builtin_error` | `"error: cannot redefine built-in function: sqrt"` | 1 |
-| `test_function_wrong_arity_error` | `"error: wrong number of arguments: f expects 2 argument(s)"` (or singular) | 1 |
-| `test_function_unknown_function_error` | `"error: undefined function: g"` | 1 |
-| `test_forward_reference_error` | `def f(x) = g(x); def g(x) = x` → `"error: undefined function: g"` | 1 |
-
-### 8.3 Regression
-
-All pre-existing `test_cli.py` test functions must continue to pass. No changes to
-existing test functions are required except the three message-string updates in
-`test_errors.py` (owned by the `errors` module LLD, not this one).
-
-### 8.4 Test naming convention
-
-Follow the existing `test_variable_assignment` / `test_variable_reference` style:
-`test_<concept>_<qualifier>`, lowercase, underscores. Each function is self-contained
-with no shared state between tests.
-
----
-
-## 9. Constraints and invariants
-
-- `fn_env` is never passed to `evaluate()` directly by `main()`; it is passed to
-  `execute_statement()`, which is responsible for forwarding it.
-- `main()` never inspects the contents of `fn_env` or `env` after the loop.
-- `main()` never instantiates `UserFunction` directly.
-- `format_result` is called at most once per invocation (on `last_result`).
-- The module must not import `UserFunction` for any purpose other than the type
-  annotation; zero coupling to the `UserFunction` internals.
-- No module-level mutable state is introduced; all state lives in local variables
-  inside `main()`.
-
----
-
-## 10. Dependencies
-
-```
-cli (__main__.py)
-  ├── calc.lexer       (Lexer)
-  ├── calc.parser      (Parser)
-  ├── calc.evaluator   (execute_statement, format_result, _DEFAULT_ENV, UserFunction)
-  └── calc.errors      (CalcError, ExpectedSingleArg, error_message)
-```
-
-No new dependencies are introduced in v0.4.0. The only change relative to v0.3.0 is:
-
-1. `fn_env: dict[str, UserFunction] = {}` is initialised alongside `env`.
-2. `execute_statement(stmt, env, fn_env)` is called with the additional `fn_env`
-   argument (the v0.3.0 signature was `execute_statement(stmt, env)`).
-3. `UserFunction` is imported for the type annotation.
+- The guard condition for suppressing stdout is `if last_result is not None`. The
+  `last_result` variable is initialised to `None` and updated only when
+  `execute_statement()` returns a non-`None` value. If every statement in the program
+  is a `def` statement, `last_result` remains `None` and no output is written. Exit
+  code is still 0. This is consistent with the v0.3.x behaviour where programs
+  consisting entirely of assignment statements also produce no stdout output.
