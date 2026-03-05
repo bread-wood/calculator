@@ -2,11 +2,15 @@ import pytest
 
 from calc.errors import UnexpectedEnd, UnexpectedToken
 from calc.lexer import Lexer
-from calc.parser import BinaryOp, Call, Name, Number, Parser, UnaryOp
+from calc.parser import Assignment, BinaryOp, Call, Name, Number, Parser, Program, UnaryOp
 
 
 def parse(expr: str):
-    return Parser(Lexer(expr)).parse()
+    return Parser(Lexer(expr)).parse_program().body[0]
+
+
+def parse_program(expr: str) -> Program:
+    return Parser(Lexer(expr)).parse_program()
 
 
 def test_number():
@@ -50,7 +54,7 @@ def test_left_associativity():
 ])
 def test_parse_errors(expr, error_type):
     with pytest.raises(error_type):
-        Parser(Lexer(expr)).parse()
+        parse_program(expr)
 
 
 def test_name_pi():
@@ -100,9 +104,84 @@ def test_name_in_binary():
 ])
 def test_parse_errors_v0_2_0(expr, error_type):
     with pytest.raises(error_type):
-        Parser(Lexer(expr)).parse()
+        parse_program(expr)
 
 
 def test_trailing_comma_is_error():
     with pytest.raises((UnexpectedEnd, UnexpectedToken)):
-        parse("f(1,)")
+        parse_program("f(1,)")
+
+
+# New v0.3.0 tests
+
+def test_assignment_simple():
+    prog = parse_program("x = 5")
+    assert prog == Program(body=[Assignment("x", Number(5.0))])
+
+
+def test_assignment_then_expression():
+    prog = parse_program("x = 5; x + 1")
+    assert prog == Program(body=[
+        Assignment("x", Number(5.0)),
+        BinaryOp("+", Name("x"), Number(1.0)),
+    ])
+
+
+def test_ident_without_equals_is_name_not_assignment():
+    prog = parse_program("x + 1")
+    assert prog == Program(body=[BinaryOp("+", Name("x"), Number(1.0))])
+
+
+def test_trailing_semicolon_accepted():
+    prog = parse_program("x = 5;")
+    assert prog == Program(body=[Assignment("x", Number(5.0))])
+
+
+def test_trailing_semicolon_multi_stmt():
+    prog = parse_program("x = 5; y = 3;")
+    assert prog == Program(body=[
+        Assignment("x", Number(5.0)),
+        Assignment("y", Number(3.0)),
+    ])
+
+
+def test_three_statements():
+    prog = parse_program("x = 5; y = x * 2; y + 1")
+    assert prog == Program(body=[
+        Assignment("x", Number(5.0)),
+        Assignment("y", BinaryOp("*", Name("x"), Number(2.0))),
+        BinaryOp("+", Name("y"), Number(1.0)),
+    ])
+
+
+@pytest.mark.parametrize("expr,error_type", [
+    ("x =", UnexpectedEnd),
+    ("x = )", UnexpectedToken),
+    ("x = 5 y = 3", UnexpectedToken),
+])
+def test_assignment_errors(expr, error_type):
+    with pytest.raises(error_type):
+        parse_program(expr)
+
+
+def test_assignment_sqrt():
+    prog = parse_program("x = sqrt(9)")
+    assert prog == Program(body=[Assignment("x", Call("sqrt", [Number(9.0)]))])
+
+
+def test_assignment_negative():
+    prog = parse_program("x = -5")
+    assert prog == Program(body=[Assignment("x", UnaryOp("-", Number(5.0)))])
+
+
+def test_expression_only():
+    prog = parse_program("2 + 3")
+    assert prog == Program(body=[BinaryOp("+", Number(2.0), Number(3.0))])
+
+
+def test_assignment_with_expr_rhs():
+    prog = parse_program("x = 5; y = x * 2")
+    assert prog == Program(body=[
+        Assignment("x", Number(5.0)),
+        Assignment("y", BinaryOp("*", Name("x"), Number(2.0))),
+    ])

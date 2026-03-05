@@ -38,20 +38,61 @@ class Call:
 ASTNode = Number | BinaryOp | UnaryOp | Name | Call
 
 
+@dataclass
+class Assignment:
+    name: str
+    value: ASTNode
+
+
+@dataclass
+class Program:
+    body: list[Statement]
+
+
+Statement = Assignment | ASTNode
+
+
 class Parser:
     def __init__(self, lexer: Lexer) -> None:
         self._lexer = lexer
         self._current: Token = self._lexer.next_token()
+        self._lookahead: Token | None = None
 
-    def parse(self) -> ASTNode:
-        node = self._parse_expr()
-        if self._current.type != TokenType.EOF:
-            raise UnexpectedToken()
-        return node
+    def parse_program(self) -> Program:
+        body: list[Statement] = []
+        while self._current.type != TokenType.EOF:
+            stmt = self._parse_statement()
+            body.append(stmt)
+            if self._current.type == TokenType.SEMICOLON:
+                self._advance()  # consume optional trailing semicolon
+            elif self._current.type != TokenType.EOF:
+                raise UnexpectedToken()
+        return Program(body=body)
+
+    def _parse_statement(self) -> Statement:
+        if self._current.type == TokenType.IDENT and self._peek_next().type == TokenType.EQUALS:
+            name = self._advance().value  # consume IDENT
+            self._advance()              # consume EQUALS
+            if self._current.type == TokenType.EOF:
+                raise UnexpectedEnd()
+            if self._current.type == TokenType.RPAREN:
+                raise UnexpectedToken()
+            value = self._parse_expr()
+            return Assignment(name=name, value=value)
+        return self._parse_expr()
+
+    def _peek_next(self) -> Token:
+        if self._lookahead is None:
+            self._lookahead = self._lexer.next_token()
+        return self._lookahead
 
     def _advance(self) -> Token:
         previous = self._current
-        self._current = self._lexer.next_token()
+        if self._lookahead is not None:
+            self._current = self._lookahead
+            self._lookahead = None
+        else:
+            self._current = self._lexer.next_token()
         return previous
 
     def _match(self, *types: TokenType) -> bool:
