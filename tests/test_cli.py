@@ -302,3 +302,16 @@ def test_function_call_error_undefined_function():
     assert r.stdout == ""
     assert r.stderr.strip() == "error: undefined function: g"
     assert r.returncode == 1
+
+
+def test_subcommand_routing_smoke(tmp_path):
+    """'plot' keyword routes to the plot subcommand, not legacy eval."""
+    import subprocess
+    import sys
+    out = tmp_path / "smoke.png"
+    result = subprocess.run(
+        [sys.executable, "-m", "calc", "plot", "x", "--output", str(out)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    assert out.exists()
