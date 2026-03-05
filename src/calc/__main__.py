@@ -26,7 +26,7 @@ def main() -> None:
     # 3. Pipeline
     try:
         lexer = Lexer(expression)
-        ast = Parser(lexer).parse()
+        ast = Parser(lexer).parse_program().body[0]
         result = evaluate(ast)
     except CalcError as e:
         print(error_message(e), file=sys.stderr)

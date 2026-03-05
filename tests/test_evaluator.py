@@ -9,7 +9,7 @@ from calc.errors import DivisionByZero, Overflow, DomainError, UnknownFunction, 
 def eval_expr(s: str) -> float:
     from calc.lexer import Lexer
     from calc.parser import Parser
-    return evaluate(Parser(Lexer(s)).parse())
+    return evaluate(Parser(Lexer(s)).parse_program().body[0])
 
 
 @pytest.mark.parametrize("expr,expected", [
