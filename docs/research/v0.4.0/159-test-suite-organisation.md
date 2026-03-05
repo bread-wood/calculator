@@ -121,11 +121,12 @@ This means the following `test_errors.py` assertions **will fail** after the
 - `test_wrong_arity_singular` (line 63)
 - `test_wrong_arity_plural` (line 67)
 
-**Decision: Update those three test assertions as part of the same PR that modifies
-the error classes, not as a separate task.** Splitting them into a separate cleanup
-PR would leave CI in a broken state between the two PRs. The cost is low (three
-one-line string changes). Track the dependency explicitly in the v0.4.0 implementation
-issue for `errors.py`.
+**Decision: Update those three test assertions and add new assertions for
+`FunctionAlreadyDefined` and `CannotRedefineBuiltin` as part of the same PR that
+modifies the error classes, not as a separate task.** Splitting them into a separate
+cleanup PR would leave CI in a broken state between the two PRs. The cost is low
+(three one-line string changes plus two new test functions). Track the dependency
+explicitly in the v0.4.0 implementation issue for `errors.py`.
 
 ---
 
