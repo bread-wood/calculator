@@ -86,6 +86,7 @@ def test_number_literals(src, value):
         ("/", TokenType.SLASH),
         ("(", TokenType.LPAREN),
         (")", TokenType.RPAREN),
+        (",", TokenType.COMMA),
     ],
 )
 def test_single_char_operators(ch, tt):
@@ -121,3 +122,78 @@ def test_eof_idempotent():
     assert lex.next_token().type == TokenType.EOF
 
 
+@pytest.mark.parametrize("src, expected_value", [
+    ("sqrt", "sqrt"), ("pi", "pi"), ("e", "e"),
+    ("atan2", "atan2"), ("_var", "_var"), ("x1", "x1"),
+])
+def test_ident_token(src, expected_value):
+    t = Lexer(src).next_token()
+    assert t.type == TokenType.IDENT
+    assert t.value == expected_value
+
+
+def test_comma_token():
+    t = Lexer(",").next_token()
+    assert t == Token(TokenType.COMMA, ",")
+
+
+def test_comma_in_sequence():
+    tokens = tokenize("2,3")
+    assert tokens == [
+        Token(TokenType.NUMBER, "2"),
+        Token(TokenType.COMMA, ","),
+        Token(TokenType.NUMBER, "3"),
+        Token(TokenType.EOF, ""),
+    ]
+
+
+@pytest.mark.parametrize("src, expected_value", [
+    ("1e10", "1e10"), ("1e+10", "1e+10"), ("1e-5", "1e-5"), ("1.5E2", "1.5E2"),
+])
+def test_sci_notation_unchanged(src, expected_value):
+    t = Lexer(src).next_token()
+    assert t.type == TokenType.NUMBER
+    assert t.value == expected_value
+
+
+def test_bare_e_after_number():
+    tokens = tokenize("2e")
+    assert tokens == [
+        Token(TokenType.NUMBER, "2"),
+        Token(TokenType.IDENT, "e"),
+        Token(TokenType.EOF, ""),
+    ]
+
+
+def test_2e_plus_produces_rollback():
+    tokens = tokenize("2e+")
+    assert tokens[0] == Token(TokenType.NUMBER, "2")
+    assert tokens[1] == Token(TokenType.IDENT, "e")
+    assert tokens[2] == Token(TokenType.PLUS, "+")
+
+
+def test_2e_star_produces_rollback():
+    tokens = tokenize("2e*3")
+    assert tokens[0] == Token(TokenType.NUMBER, "2")
+    assert tokens[1] == Token(TokenType.IDENT, "e")
+
+
+def test_function_call_token_sequence():
+    tokens = tokenize("sqrt(9)")
+    assert tokens == [
+        Token(TokenType.IDENT,  "sqrt"),
+        Token(TokenType.LPAREN, "("),
+        Token(TokenType.NUMBER, "9"),
+        Token(TokenType.RPAREN, ")"),
+        Token(TokenType.EOF,    ""),
+    ]
+
+
+def test_constant_in_expression():
+    tokens = tokenize("2*pi")
+    assert tokens == [
+        Token(TokenType.NUMBER, "2"),
+        Token(TokenType.STAR,   "*"),
+        Token(TokenType.IDENT,  "pi"),
+        Token(TokenType.EOF,    ""),
+    ]
