@@ -1,9 +1,10 @@
 import math
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Callable
 
-from calc.parser import ASTNode, Number, BinaryOp, UnaryOp, Name, Call
-from calc.errors import DivisionByZero, Overflow, DomainError, UnknownFunction, WrongArity, UndefinedVariable
+from calc.parser import ASTNode, Number, BinaryOp, UnaryOp, Name, Call, Assignment, Statement
+from calc.errors import DivisionByZero, Overflow, DomainError, UnknownFunction, WrongArity, UndefinedVariable, ConstantReassignment
 
 
 def _round_half_away(x: float) -> float:
@@ -35,10 +36,12 @@ _FUNCTION_LIST: list[FunctionEntry] = [
 
 _FUNCTION_TABLE: dict[str, FunctionEntry] = {e.name: e for e in _FUNCTION_LIST}
 
-_DEFAULT_ENV: dict[str, float] = {
+_DEFAULT_ENV: MappingProxyType = MappingProxyType({
     "pi": math.pi,
     "e":  math.e,
-}
+})
+
+_CONSTANTS: frozenset[str] = frozenset({"pi", "e"})
 
 
 def evaluate(node: ASTNode, env: dict[str, float] | None = None) -> float:
@@ -92,6 +95,16 @@ def evaluate(node: ASTNode, env: dict[str, float] | None = None) -> float:
         return result
 
     raise TypeError(f"Unknown node type: {type(node)!r}")
+
+
+def execute_statement(stmt: Statement, env: dict[str, float]) -> float:
+    if isinstance(stmt, Assignment):
+        if stmt.name in _CONSTANTS:
+            raise ConstantReassignment(stmt.name)
+        value = evaluate(stmt.value, env)
+        env[stmt.name] = value
+        return value
+    return evaluate(stmt, env)
 
 
 def format_result(value: float) -> str:

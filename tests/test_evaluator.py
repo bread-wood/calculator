@@ -1,9 +1,11 @@
 import math
+from types import MappingProxyType
 
 import pytest
 
-from calc.evaluator import evaluate, format_result, _round_half_away
-from calc.errors import DivisionByZero, Overflow, DomainError, UnknownFunction, WrongArity
+from calc.evaluator import evaluate, execute_statement, format_result, _round_half_away, _DEFAULT_ENV
+from calc.errors import DivisionByZero, Overflow, DomainError, UnknownFunction, WrongArity, UndefinedVariable, ConstantReassignment
+from calc.parser import Assignment, BinaryOp, Number, Name
 
 
 def eval_expr(s: str) -> float:
@@ -113,3 +115,39 @@ def test_round_half_away(x, expected):
 ])
 def test_format_result_decimals(value, expected_str):
     assert format_result(value) == expected_str
+
+
+def test_default_env_is_mapping_proxy():
+    assert isinstance(_DEFAULT_ENV, MappingProxyType)
+
+
+def test_default_env_immutable():
+    with pytest.raises(TypeError):
+        _DEFAULT_ENV["x"] = 1.0
+
+
+def test_undefined_variable_raised():
+    with pytest.raises(UndefinedVariable):
+        evaluate(Name("x"), {})
+
+
+def test_execute_statement_assignment():
+    env = {}
+    result = execute_statement(Assignment("x", Number(5.0)), env)
+    assert result == 5.0
+    assert env == {"x": 5.0}
+
+
+def test_execute_statement_expression():
+    result = execute_statement(BinaryOp("+", Number(2.0), Number(3.0)), {})
+    assert result == 5.0
+
+
+def test_execute_statement_constant_reassignment_pi():
+    with pytest.raises(ConstantReassignment):
+        execute_statement(Assignment("pi", Number(3.0)), dict(_DEFAULT_ENV))
+
+
+def test_execute_statement_constant_reassignment_e():
+    with pytest.raises(ConstantReassignment):
+        execute_statement(Assignment("e", Number(1.0)), dict(_DEFAULT_ENV))
