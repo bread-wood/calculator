@@ -16,6 +16,8 @@ class TokenType(Enum):
     EOF = auto()
     UNKNOWN = auto()
     IDENT = auto()
+    SEMICOLON = auto()
+    EQUALS = auto()
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,8 @@ _SINGLE_CHAR: dict[str, TokenType] = {
     "(": TokenType.LPAREN,
     ")": TokenType.RPAREN,
     ",": TokenType.COMMA,
+    ";": TokenType.SEMICOLON,
+    "=": TokenType.EQUALS,
 }
 
 
