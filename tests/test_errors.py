@@ -11,7 +11,8 @@ from calc.errors import (
     DomainError,
     UnknownFunction,
     WrongArity,
-    UnknownName,
+    UndefinedVariable,
+    ConstantReassignment,
 )
 
 
@@ -67,11 +68,11 @@ def test_wrong_arity_plural():
 
 
 def test_unknown_name_message():
-    assert error_message(UnknownName("pi_approx")) == "error: unknown name 'pi_approx'"
+    assert error_message(UndefinedVariable("pi_approx")) == "error: undefined variable: pi_approx"
 
 
 def test_new_subclasses_inherit_from_calc_error():
-    for cls in (DomainError, UnknownFunction, WrongArity, UnknownName):
+    for cls in (DomainError, UnknownFunction, WrongArity, UndefinedVariable):
         assert issubclass(cls, CalcError)
 
 
@@ -86,4 +87,30 @@ def test_wrong_arity_stores_fields():
 
 
 def test_unknown_name_stores_name():
-    assert UnknownName("x").name == "x"
+    assert UndefinedVariable("x").name == "x"
+
+
+def test_undefined_variable_message():
+    assert error_message(UndefinedVariable("x")) == "error: undefined variable: x"
+
+
+def test_undefined_variable_stores_name():
+    assert UndefinedVariable("x").name == "x"
+
+
+def test_constant_reassignment_message():
+    assert error_message(ConstantReassignment("pi")) == "error: cannot reassign constant: pi"
+
+
+def test_constant_reassignment_stores_name():
+    assert ConstantReassignment("pi").name == "pi"
+
+
+def test_constant_reassignment_no_quotes_in_message():
+    msg = error_message(ConstantReassignment("e"))
+    assert "e" in msg
+    assert "'e'" not in msg
+
+
+def test_constant_reassignment_inherits_calc_error():
+    assert issubclass(ConstantReassignment, CalcError)

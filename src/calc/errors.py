@@ -72,13 +72,22 @@ class WrongArity(CalcError):
         return f"'{self.name}' expects {self.expected} {noun}"
 
 
-class UnknownName(CalcError):
+class UndefinedVariable(CalcError):
     def __init__(self, name: str) -> None:
         self.name = name
         super().__init__(name)
 
     def description(self) -> str:
-        return f"unknown name '{self.name}'"
+        return f"undefined variable: {self.name}"
+
+
+class ConstantReassignment(CalcError):
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(name)
+
+    def description(self) -> str:
+        return f"cannot reassign constant: {self.name}"
 
 
 def error_message(e: CalcError) -> str:
