@@ -4,7 +4,7 @@ import math
 import statistics
 from dataclasses import dataclass
 
-from calc.errors import CalcError, DomainEmpty
+from calc.errors import DivisionByZero, DomainEmpty, DomainError, Overflow
 from calc.evaluator import evaluate, _CONSTANTS_VALUES
 
 
@@ -38,7 +38,7 @@ def _sample_expression(ast, x_values: list[float]) -> list[tuple[float, float | 
                 raw.append((x, None))
             else:
                 raw.append((x, y))
-        except CalcError:
+        except (DivisionByZero, DomainError, Overflow):
             raw.append((x, None))
     return raw
 
