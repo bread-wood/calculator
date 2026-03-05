@@ -52,6 +52,11 @@ class DomainError(CalcError):
         return "domain error"
 
 
+class DomainEmpty(CalcError):
+    def description(self) -> str:
+        return "no valid points in domain"
+
+
 class UnknownFunction(CalcError):
     def __init__(self, name: str) -> None:
         self.name = name
