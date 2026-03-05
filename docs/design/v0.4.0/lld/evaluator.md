@@ -2,6 +2,7 @@
 
 **Module:** `evaluator` (`src/calc/evaluator.py`)
 **Milestone:** v0.4.0
+**Issue:** #191
 **Date:** 2026-03-05
 **Status:** Draft
 **Research inputs:** #154, #155, #156, #157, #159
