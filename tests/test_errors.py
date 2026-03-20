@@ -15,6 +15,11 @@ from calc.errors import (
     ConstantReassignment,
     FunctionAlreadyDefined,
     CannotRedefineBuiltin,
+    UndefinedFunction,
+    OutputWriteError,
+    UnsupportedFormat,
+    DomainEmpty,
+    InvalidDomainBounds,
 )
 
 
@@ -159,3 +164,47 @@ def test_function_already_defined_not_subclass_of_cannot_redefine():
 
 def test_cannot_redefine_not_subclass_of_function_already_defined():
     assert not issubclass(CannotRedefineBuiltin, FunctionAlreadyDefined)
+
+
+# v0.5.0 — plot error classes
+def test_undefined_function():
+    e = UndefinedFunction("foo")
+    assert isinstance(e, CalcError)
+    assert e.description() == "undefined function: foo"
+    assert error_message(e) == "error: undefined function: foo"
+    assert str(e) == "foo"
+
+
+def test_output_write_error():
+    e = OutputWriteError("Permission denied: '/root/plot.png'")
+    assert isinstance(e, CalcError)
+    assert e.description() == "cannot write output: Permission denied: '/root/plot.png'"
+    assert error_message(e) == "error: cannot write output: Permission denied: '/root/plot.png'"
+    assert str(e) == "Permission denied: '/root/plot.png'"
+
+
+def test_unsupported_format():
+    e = UnsupportedFormat(".bmp")
+    assert isinstance(e, CalcError)
+    assert e.description() == "unsupported format: .bmp; use .png or .svg"
+    assert error_message(e) == "error: unsupported format: .bmp; use .png or .svg"
+    assert str(e) == ".bmp"
+
+
+def test_domain_empty():
+    e = DomainEmpty()
+    assert isinstance(e, CalcError)
+    assert e.description() == "expression undefined over entire domain"
+    assert error_message(e) == "error: expression undefined over entire domain"
+
+
+def test_invalid_domain_bounds():
+    e = InvalidDomainBounds()
+    assert isinstance(e, CalcError)
+    assert e.description() == "xmin must be less than xmax"
+    assert error_message(e) == "error: xmin must be less than xmax"
+
+
+def test_undefined_function_is_not_unknown_function():
+    assert not issubclass(UndefinedFunction, UnknownFunction)
+    assert not issubclass(UnknownFunction, UndefinedFunction)
